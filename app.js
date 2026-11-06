@@ -302,7 +302,7 @@ function buildKeys() {
     const alt = main === nn(F.FLAT[pc]) ? nn(F.SHARP[pc]) : nn(F.FLAT[pc]);
     return `<button class="key ${nat ? 'w' : 'b'}" data-pc="${pc}" aria-label="${main}">${sharpen(main)}${nat ? '' : `<small>${sharpen(alt)}</small>`}</button>`;
   }).join('');
-  const BASIC = isBeg() ? ['', 'm', '7'] : ['', 'm', '7', 'maj7', 'm7', 'sus2', 'sus4', '5'];
+  const BASIC = isBeg() ? ['', 'm', '7', '5'] : ['', 'm', '7', 'maj7', 'm7', 'sus2', 'sus4', '5'];
   const chip = ([v, l], cls) => `<button class="chip ${cls}" data-suf="${v}">${l === 'major' ? 'major' : sharpen(skS(l))}</button>`;
   const basic = SUFFIXES.filter(x => BASIC.includes(x[0])), more = SUFFIXES.filter(x => !BASIC.includes(x[0])), open = !!cfg().more;
   const beg = isBeg();
@@ -359,8 +359,8 @@ function tagsFor(v, name) {
   return t;
 }
 const FIRST4 = ['Em', 'Am', 'D', 'G'];
-const learned = n => !!(cfg().learned || {})[canon(n)];
-function toggleLearned(n) { const L = cfg().learned = cfg().learned || {}, k = canon(n); if (L[k]) delete L[k]; else L[k] = 1; save(); renderStart(); }
+const learned = k => !!(cfg().learned || {})[k];   // k = canonical English chord name
+function toggleLearned(k) { const L = cfg().learned = cfg().learned || {}; if (L[k]) delete L[k]; else L[k] = 1; save(); renderStart(); renderPlayable(); }
 function renderStart() {
   const el = $('#startCard'); if (!el) return;
   if (!isBeg()) { el.hidden = true; el.innerHTML = ''; return; }
@@ -368,7 +368,7 @@ function renderStart() {
   const n = FIRST4.filter(learned).length;
   el.innerHTML = `<h3 class="sect">Your first 4 chords <small>${n} of 4 learned</small></h3>
     <div class="grid">${FIRST4.map(c => { const nm = cl(c), v = preferred(nm); return `<div class="vcard stile ${learned(c) ? 'done' : ''}"><button class="stopen" data-st="${c}" aria-label="${esc(nm)}"><div class="name">${esc(sharpen(nm))}</div>${v ? diagram(v) : ''}</button><button class="btn sm ${learned(c) ? 'primary' : ''}" data-learn="${c}">${learned(c) ? '✓ I can play this' : 'Mark as learned'}</button></div>`; }).join('')}</div>
-    <div class="actions" style="margin:10px 0"><button class="btn" data-song="s-scar">♪ Play a song with these chords</button></div>`;
+    <div class="actions" style="margin:10px 0"><button class="btn" id="stSongs">♪ Songs you can play with these chords</button></div>`;
 }
 function applyBeg() {
   const t = document.querySelector('#nav [data-view="theory"]'); if (t) t.hidden = isBeg();
@@ -418,36 +418,6 @@ function renderMine() {
 
 /* ================= songs ================= */
 const SAMPLES = [
-  { id: 's-grace', sample: true, title: 'Amazing Grace', artist: 'Traditional · ChordPro format', text:
-`{title: Amazing Grace}
-{artist: Traditional}
-{key: G}
-[Verse 1]
-[G]Amazing [G7]grace, how [C]sweet the [G]sound
-That saved a [Em]wretch like [D]me
-I [G]once was lost but [C]now am [G]found
-Was [Em]blind but [D]now I [G]see
-` },
-  { id: 's-scar', sample: true, title: 'Scarborough Fair', artist: 'Traditional · uses only Em, G, D, Am', text:
-`{title: Scarborough Fair}
-{artist: Traditional}
-[Verse 1]
-[Em]Are you going to [G]Scarborough [Em]Fair?
-Parsley, [D]sage, rose[Am]mary and [Em]thyme
-[Em]Remember me to [G]one who lives [Em]there
-She [D]once was a [Am]true love of [Em]mine
-` },
-  { id: 's-sun', sample: true, title: 'House of the Rising Sun', artist: 'Traditional · chords above lyrics', text:
-`[Verse 1]
-Am        C       D        F
-There is a house in New Orleans
-Am       C        E
-They call the Rising Sun
-Am          C         D      F
-And it's been the ruin of many a poor boy
-Am     E      Am
-And God, I know I'm one
-` },
   { id: 's-weird', sample: true, title: 'Weird chord playground', artist: 'Fretwork · tap each chord', text:
 `{title: Weird chord playground}
 [Intro]
@@ -478,7 +448,48 @@ function songCard(s) {
   return `<button class="scard" data-song="${esc(s.id)}"><b>${esc(s.title || p.meta.title || 'Untitled')}</b><span>${esc(s.artist || p.meta.artist || '')}</span>
     <div class="mini">${ch.map(c => `<span class="pill">${esc(sharpen(c))}</span>`).join('')}</div></button>`;
 }
+
+/* Progressions only (no lyrics): main chords of well-known songs, for learning. Each row links to a web search, nothing is hosted here. */
+const PLAYABLE = [
+  ['Knockin’ on Heaven’s Door', 'Bob Dylan', 'rock', ['G', 'D', 'Am', 'C'], 'G D Am · G D C'],
+  ['Sweet Home Alabama', 'Lynyrd Skynyrd', 'rock', ['D', 'C', 'G'], 'D C G'],
+  ['Bad Moon Rising', 'Creedence Clearwater Revival', 'rock', ['D', 'A', 'G'], 'D A G D'],
+  ['Brown Eyed Girl', 'Van Morrison', 'rock', ['G', 'C', 'D'], 'G C G D'],
+  ['Zombie', 'The Cranberries', 'rock', ['Em', 'C', 'G', 'D'], 'Em C G D'],
+  ['Good Riddance (Time of Your Life)', 'Green Day', 'rock', ['G', 'C', 'D'], 'G C D (play C lightly as Cadd9)'],
+  ['Highway to Hell', 'AC/DC', 'rock', ['A', 'D', 'G'], 'A D G'],
+  ['Back in Black', 'AC/DC', 'rock', ['E', 'D', 'A'], 'E D A (power chords work well)'],
+  ['Hey Joe', 'Jimi Hendrix', 'rock', ['C', 'G', 'D', 'A', 'E'], 'C G D A E'],
+  ['La Bamba', 'Ritchie Valens', 'rock & roll', ['C', 'F', 'G'], 'C F G'],
+  ['Twist and Shout', 'The Beatles', 'rock & roll', ['D', 'G', 'A'], 'D G A'],
+  ['Louie Louie', 'The Kingsmen', 'rock & roll', ['A', 'D', 'Em'], 'A D Em D'],
+  ['Wild Thing', 'The Troggs', 'rock & roll', ['A', 'D', 'E'], 'A D E D'],
+  ['Gloria', 'Them', 'rock & roll', ['E', 'D', 'A'], 'E D A'],
+  ['Stand By Me', 'Ben E. King', 'rock & roll', ['G', 'Em', 'C', 'D'], 'G Em C D'],
+  ['Blitzkrieg Bop', 'Ramones', 'punk', ['A', 'D', 'E'], 'A D E'],
+  ['Smells Like Teen Spirit', 'Nirvana', 'grunge · power chords', ['F5', 'Bb5', 'Ab5', 'Db5'], 'F5 B♭5 A♭5 D♭5 (riff style)'],
+  ['Smoke on the Water', 'Deep Purple', 'rock · power chords', ['G5', 'Bb5', 'C5', 'Db5'], 'G5 B♭5 C5 · G5 B♭5 D♭5 C5'],
+  ['Seven Nation Army', 'The White Stripes', 'rock · power chords', ['E5', 'G5', 'D5', 'C5', 'B5'], 'E5 G5 E5 D5 C5 B5 (the famous riff)'],
+  ['All the Small Things', 'blink-182', 'punk · power chords', ['G5', 'C5', 'D5'], 'G5 C5 D5'],
+  ['Basket Case', 'Green Day', 'punk · power chords', ['E5', 'B5', 'C#5', 'G#5', 'A5'], 'E5 B5 C♯5 G♯5 A5 B5']
+];
+function renderPlayable() {
+  const el = $('#playable'); if (!el) return;
+  const beg = isBeg();
+  const rows = PLAYABLE.map(r => ({ r, n: r[3].length, ok: r[3].every(c => learned(c)) }))
+    .sort((a, b) => (b.ok - a.ok) || (a.n - b.n));
+  el.innerHTML = `<h3 class="sect">Songs you can play <small>chords only, no lyrics</small></h3>
+    <p class="note" style="margin:0 0 8px">Main chord progressions of well-known songs, simplest first. Chords like E5 or G5 are power chords: two or three strings, one shape you slide up and down the neck. “Find chords” opens a web search in a new tab, where you can look for the full chart.</p>
+    ${rows.map(({ r, ok }) => {
+      const q = encodeURIComponent(r[0] + ' ' + r[1] + ' chords');
+      return `<div class="scard prow ${ok ? 'ok' : ''}"><b>${esc(r[0])}</b><span>${esc(r[1])} · ${esc(r[2])}${ok ? ' · you know these chords' : ''}</span>
+        <div class="mini">${r[3].map(c => `<button class="pill" data-open="${esc(cl(c))}">${esc(sharpen(cl(c)))}</button>`).join('')}</div>
+        <span class="progline">${esc(r[4])}</span>
+        <a class="btn sm ghost" href="https://duckduckgo.com/?q=${q}" target="_blank" rel="noopener noreferrer">Find chords ↗</a></div>`;
+    }).join('')}`;
+}
 function renderSongList() {
+  renderPlayable();
   $('#songList').innerHTML = D.songs.length ? D.songs.map(songCard).join('') : '<div class="empty">No songs yet. Import one: paste text from any chord site, or open a ChordPro / text file.</div>';
   $('#sampleList').innerHTML = SAMPLES.map(songCard).join('');
 }
@@ -546,6 +557,7 @@ function importModal(song) {
     <p class="note">Paste chords-over-lyrics text (the usual format on chord sites) or ChordPro with [Am] inline chords. You can also open a .txt, .cho, .crd or .pro file.</p>
     <label class="field"><span>Title</span><input id="imTitle" value="${esc(base.title || '')}" placeholder="Song title"></label>
     <label class="field"><span>Artist</span><input id="imArtist" value="${esc(base.artist || '')}" placeholder="Optional"></label>
+    <p class="note"><a id="imFind" href="#" target="_blank" rel="noopener noreferrer">Find chords for this song online ↗</a> (opens a web search in a new tab; copy the chords back here)</p>
     <label class="field"><span>Song text</span><textarea id="imText" placeholder="   Am        G&#10;Paste lyrics with chords here…" spellcheck="false">${esc(base.text || '')}</textarea></label>
     <div class="detected" id="imDet"></div>
     <div class="row">
@@ -557,6 +569,8 @@ function importModal(song) {
       <button class="btn primary" id="imSave">Save</button>
     </div>`, body => {
     const ta = $('#imText', body), det = $('#imDet', body);
+    const findLink = () => { const q = ($('#imTitle', body).value + ' ' + $('#imArtist', body).value).trim(); const a = $('#imFind', body); a.href = 'https://duckduckgo.com/?q=' + encodeURIComponent((q || 'guitar') + ' chords'); };
+    $('#imTitle', body).addEventListener('input', findLink); $('#imArtist', body).addEventListener('input', findLink); findLink();
     const detect = () => {
       const nt = detectNt(ta.value), p = F.withLocale(nt, () => F.parseSong(ta.value)), ch = F.withLocale(nt, () => F.songChords(p)).map(c => F.convert(c, nt, LANG));
       if (!ta.value.trim()) { det.textContent = ''; return; }
@@ -891,6 +905,7 @@ function initFind() {
   $('#fdReset').onclick = () => { FD.frets = [0, 0, 0, 0, 0, 0]; FD.base = 1; renderFind(); };
   $('#fdPlay').onclick = () => strum({ frets: FD.frets });
   $('#findRes').addEventListener('click', e => {
+    if (e.target.closest('#fdAll')) { FD.all = true; renderFind(); return; }
     const o = e.target.closest('[data-fopen]'), sv = e.target.closest('[data-fsave]');
     if (o) findOpen(+o.dataset.fopen); else if (sv) findOpen(+sv.dataset.fsave, true);
   });
@@ -1248,7 +1263,7 @@ function init() {
       toast(primaryKey(S.text) ? S.text + ': this shape is now the primary voicing' : 'Primary cleared for ' + S.text);
       refreshAll(); return;
     }
-    if (e.target.closest('#btnLearn')) { toggleLearned(S.text); renderChord(); return; }
+    if (e.target.closest('#btnLearn')) { toggleLearned(canon(S.text)); renderChord(); return; }
     if (e.target.closest('#btnTheory')) { thOpen(S.text); return; }
     if (e.target.closest('#btnPlay') || e.target.closest('#detailDia')) { strum(S.list[S.sel]); return; }
     const m = e.target.closest('[data-mode]'); if (m) { cfg().label = m.dataset.mode; save(); renderChord(); return; }
@@ -1265,7 +1280,7 @@ function init() {
   $('#startCard').addEventListener('click', e => {
     const l = e.target.closest('[data-learn]'); if (l) { toggleLearned(l.dataset.learn); return; }
     const o = e.target.closest('[data-st]'); if (o) { setChordText(cl(o.dataset.st)); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
-    const sg = e.target.closest('[data-song]'); if (sg) openSong(sg.dataset.song);
+    if (e.target.closest('#stSongs')) { showView('songs'); $('#playable').scrollIntoView({ behavior: 'smooth' }); }
   });
   $('#btnImport').onclick = () => importModal();
   $('#songList').onclick = $('#sampleList').onclick = e => { const b = e.target.closest('[data-song]'); if (b) openSong(b.dataset.song); };
@@ -1280,7 +1295,7 @@ function init() {
   $('#sheet').addEventListener('click', e => { const c = e.target.closest('[data-c]'); if (c) openPicker(c.dataset.c); });
   $('#sheet').addEventListener('keydown', e => { if (e.key === 'Enter') { const c = e.target.closest('[data-c]'); if (c) openPicker(c.dataset.c); } });
   $('#btnSettings').onclick = settingsModal;
-  $('#btnLang').textContent = SK ? 'EN' : 'SK';
+  $('#lgTxt').textContent = SK ? 'EN' : 'SK'; $('#lgCap').textContent = SK ? 'English' : 'Slovenčina';
   $('#btnLang').onclick = () => setLang(SK ? 'en' : 'sk');
   $('#btnProfile').onclick = profileModal;
 

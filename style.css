@@ -328,3 +328,27 @@ body.alt-tuning .deck{box-shadow:0 8px 14px -10px #000,inset 0 -3px 0 #f0a93a}
 .wip{margin:10px 12px 0;padding:8px 14px;border-radius:10px;font-size:.9rem;text-align:center;color:#f2e6cd;background:#2f2822;border:1px dashed #c9a24a99}
 .wip b{color:#f6e2a0}
 .wip a{color:#f6e2a0;font-weight:700;text-decoration:underline}
+
+.startcard{margin:14px 0}
+.stile{display:flex;flex-direction:column;gap:6px;align-items:stretch;cursor:default}
+.stile .stopen{background:none;border:0;padding:0;cursor:pointer;color:inherit;font:inherit}
+.stile.done{outline:2px solid #5a8f3c;outline-offset:-2px}
+
+.kcap{display:none}
+@media (max-width:700px){
+  .tools{width:100%;justify-content:space-between;gap:6px}
+  .tools .knob{width:auto;flex:1;height:44px;border-radius:999px;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 8px}
+  .tools .chip-btn{flex:1.4;justify-content:center;padding:4px 10px 4px 4px}
+  .tools .who{display:inline;font-size:.85rem}
+  .kcap{display:inline;font-size:.78rem;font-weight:600;font-family:inherit}
+  .sheet .ln{flex-wrap:wrap;width:auto;min-width:0}
+  .sheet .sg{max-width:100%}
+  .sheet .tx{white-space:pre-wrap}
+}
+@media (max-width:700px){ #lgTxt{display:none} .tools .knob{min-width:0;padding:0 6px} }
+@media (max-width:700px){ .tools .knob svg{flex:none;width:20px;height:20px} }
+
+.prow{display:flex;flex-direction:column;gap:4px;align-items:flex-start;text-align:left;cursor:default;margin-bottom:8px}
+.prow.ok{outline:2px solid #5a8f3c;outline-offset:-2px}
+.prow .pill{cursor:pointer;border:0;font:inherit}
+.prow .progline{font-size:.85rem;opacity:.75}
