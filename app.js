@@ -1,6 +1,7 @@
 /* Fretwork UI */
 (function () {
 'use strict';
+const VER = (() => { try { return new URL(document.currentScript.src).searchParams.get('v') || '0'; } catch (e) { return '0'; } })();   // release number, set in index.html (?v=N)
 const F = window.Fretwork;
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
@@ -1318,7 +1319,22 @@ function init() {
     if (e.target.id === 'tbStd') { cfg().tuning = 'Standard (E A D G B E)'; save(); VC.clear(); buildKeys(); updateChord(); renderFind(); renderTheory(); renderMine(); renderSongList(); if (S.song && $('#v-song').classList.contains('on')) renderSong(); }
   });
   cloudInit();
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    const hadSW = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js?v=' + VER).then(reg => {
+      const check = () => reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+      setInterval(check, 30 * 60 * 1000);
+    }).catch(() => {});
+    let shown = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadSW || shown) return; shown = true;   // first install is not an update
+      const bar = document.createElement('div'); bar.className = 'updbar'; bar.setAttribute('role', 'status');
+      bar.innerHTML = (SK ? 'Je dostupná nová verzia. ' : 'A new version is available. ') + `<button class="btn sm primary">${SK ? 'Obnoviť' : 'Reload'}</button>`;
+      bar.querySelector('button').onclick = () => location.reload();
+      document.body.appendChild(bar);
+    });
+  }
 }
 init();
 })();

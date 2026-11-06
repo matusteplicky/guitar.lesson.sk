@@ -352,3 +352,5 @@ body.alt-tuning .deck{box-shadow:0 8px 14px -10px #000,inset 0 -3px 0 #f0a93a}
 .prow.ok{outline:2px solid #5a8f3c;outline-offset:-2px}
 .prow .pill{cursor:pointer;border:0;font:inherit}
 .prow .progline{font-size:.85rem;opacity:.75}
+
+.updbar{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:60;display:flex;gap:10px;align-items:center;padding:10px 14px;border-radius:999px;background:#2a1a10;color:#f6e2a0;border:1px solid #cfa447;box-shadow:0 6px 18px #000a;font-size:.9rem;max-width:calc(100vw - 24px)}
