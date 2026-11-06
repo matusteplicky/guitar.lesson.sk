@@ -37,7 +37,7 @@ const LS = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { toast('Storage is full or blocked'); } },
   del(k) { try { localStorage.removeItem(k); } catch (e) {} }
 };
-const DEFAULTS = () => ({ songs: [], pref: {}, settings: { tuning: 'Standard (E A D G B E)', label: 'finger', lh: false, flats: false, sound: true, fs: 18 } });
+const DEFAULTS = () => ({ songs: [], pref: {}, settings: { tuning: 'Standard (E A D G B E)', label: 'finger', lh: false, flats: false, sound: true, fs: 18, beginner: null } });
 const A = { users: LS.get('fw.users', []), uid: LS.get('fw.session', 'guest') };
 if (A.uid !== 'guest' && !A.uid.startsWith('c:') && !A.users.find(u => u.id === A.uid)) A.uid = 'guest';
 const BASE_TUN = new Set(Object.keys(F.TUNINGS));
@@ -291,7 +291,9 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal
 const SUFFIXES = [['', 'major'], ['m', 'minor'], ['7', '7'], ['maj7', 'maj7'], ['m7', 'm7'], ['6', '6'], ['m6', 'm6'], ['9', '9'], ['m9', 'm9'], ['maj9', 'maj9'], ['add9', 'add9'],
   ['sus2', 'sus2'], ['sus4', 'sus4'], ['7sus4', '7sus4'], ['dim', 'dim'], ['dim7', 'dim7'], ['m7b5', 'm7♭5'], ['aug', 'aug'], ['5', '5'], ['11', '11'], ['13', '13'], ['69', '6/9'], ['7b9', '7♭9'], ['7#9', '7♯9'], ['7#11', '7♯11'], ['mMaj7', 'm(maj7)'], ['7alt', 'alt']];
 const ROOTS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-const S = { text: 'Am7', chord: null, list: [], sel: 0, song: null, tr: 0 };
+const isBeg = () => cfg().beginner !== false;   // null (not asked yet) counts as beginner
+const isEasy = v => !v.barre && v.fingerCount <= 3 && v.pos <= 3;
+const S = { showAll: false, text: isBeg() ? 'Em' : 'Am7', chord: null, list: [], sel: 0, song: null, tr: 0 };
 
 function rootName(pc) { return F.pcLoc(pc, cfg().flats); }
 function buildKeys() {
@@ -300,11 +302,12 @@ function buildKeys() {
     const alt = main === nn(F.FLAT[pc]) ? nn(F.SHARP[pc]) : nn(F.FLAT[pc]);
     return `<button class="key ${nat ? 'w' : 'b'}" data-pc="${pc}" aria-label="${main}">${sharpen(main)}${nat ? '' : `<small>${sharpen(alt)}</small>`}</button>`;
   }).join('');
-  const BASIC = ['', 'm', '7', 'maj7', 'm7', 'sus2', 'sus4', '5'];
+  const BASIC = isBeg() ? ['', 'm', '7'] : ['', 'm', '7', 'maj7', 'm7', 'sus2', 'sus4', '5'];
   const chip = ([v, l], cls) => `<button class="chip ${cls}" data-suf="${v}">${l === 'major' ? 'major' : sharpen(skS(l))}</button>`;
   const basic = SUFFIXES.filter(x => BASIC.includes(x[0])), more = SUFFIXES.filter(x => !BASIC.includes(x[0])), open = !!cfg().more;
-  $('#suffixChips').innerHTML = `<div class="chiprow">${basic.map(x => chip(x, 'basic')).join('')}<button class="chip morebtn" id="btnMore" aria-expanded="${open}">${open ? 'Fewer ▴' : 'More chord types (' + more.length + ') ▾'}</button></div>`
-    + `<div class="chiprow" ${open ? '' : 'hidden'}>${more.map(x => chip(x, '')).join('')}</div>`;
+  const beg = isBeg();
+  $('#suffixChips').innerHTML = `<div class="chiprow">${basic.map(x => chip(x, 'basic')).join('')}${beg ? '' : `<button class="chip morebtn" id="btnMore" aria-expanded="${open}">${open ? 'Fewer ▴' : 'More chord types (' + more.length + ') ▾'}</button>`}</div>`
+    + (beg ? '' : `<div class="chiprow" ${open ? '' : 'hidden'}>${more.map(x => chip(x, '')).join('')}</div>`);
   markKeys();
 }
 function splitText(t) {
@@ -333,6 +336,15 @@ function updateChord() {
   info.className = 'status'; info.innerHTML = '<b>' + esc(sharpen(raw)) + '</b>' + usualHtml(out.chord) + ' · ' + esc(out.chord.notes.map(n => sharpen(nn(n))).join(' – '));
   const pk = preferred(raw);
   if (pk && !S.list.includes(pk)) { S.list.push(pk); S.list.sort((x, y) => x.pos - y.pos); }
+  S.fullCount = S.list.length; S.hidden = 0;
+  if (isBeg() && !S.showAll) {
+    const easy = S.list.filter(x => isEasy(x) || x === pk);
+    if (easy.length && easy.length < S.list.length) {
+      easy.sort((a, b) => (a === pk ? -1 : b === pk ? 1 : 0) || a.fingerCount - b.fingerCount || a.pos - b.pos);
+      const keep = easy.slice(0, 4); if (pk && !keep.includes(pk)) keep[keep.length - 1] = pk;
+      S.hidden = S.list.length - keep.length; S.list = keep;
+    }
+  }
   S.sel = Math.max(0, S.list.indexOf(pk));
   renderChord();
 }
@@ -345,6 +357,22 @@ function tagsFor(v, name) {
   if (v.omits.length) t += `<span class="tag">no ${esc(v.omits.map(sharpen).join(', '))}</span>`;
   if (v.slashBass) t += ` <span class="tag bassTag">bass ${esc(sharpen(nn(v.slashBass)))}</span>`;
   return t;
+}
+const FIRST4 = ['Em', 'Am', 'D', 'G'];
+const learned = n => !!(cfg().learned || {})[canon(n)];
+function toggleLearned(n) { const L = cfg().learned = cfg().learned || {}, k = canon(n); if (L[k]) delete L[k]; else L[k] = 1; save(); renderStart(); }
+function renderStart() {
+  const el = $('#startCard'); if (!el) return;
+  if (!isBeg()) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  const n = FIRST4.filter(learned).length;
+  el.innerHTML = `<h3 class="sect">Your first 4 chords <small>${n} of 4 learned</small></h3>
+    <div class="grid">${FIRST4.map(c => { const nm = cl(c), v = preferred(nm); return `<div class="vcard stile ${learned(c) ? 'done' : ''}"><button class="stopen" data-st="${c}" aria-label="${esc(nm)}"><div class="name">${esc(sharpen(nm))}</div>${v ? diagram(v) : ''}</button><button class="btn sm ${learned(c) ? 'primary' : ''}" data-learn="${c}">${learned(c) ? '✓ I can play this' : 'Mark as learned'}</button></div>`; }).join('')}</div>
+    <div class="actions" style="margin:10px 0"><button class="btn" data-song="s-scar">♪ Play a song with these chords</button></div>`;
+}
+function applyBeg() {
+  const t = document.querySelector('#nav [data-view="theory"]'); if (t) t.hidden = isBeg();
+  renderStart();
 }
 function renderChord() {
   const raw = S.text, chord = S.chord, v = S.list[S.sel];
@@ -367,17 +395,19 @@ function renderChord() {
       <div class="actions">
         <button class="btn primary" id="btnPlay">▶ Strum</button>
         <button class="btn" id="btnPref">${isPref ? '★ My voicing' : '☆ Use in my songs'}</button>
-        <button class="btn ghost" id="btnTheory">Theory ›</button>
+        ${isBeg() ? `<button class="btn" id="btnLearn">${learned(canon(raw)) ? '✓ I can play this' : 'Mark as learned'}</button>` : '<button class="btn ghost" id="btnTheory">Theory ›</button>'}
         ${TP.on ? `<button class="btn teach" id="btnPrimary">${isPrim ? '◆ Primary (tap to clear)' : '◆ Make primary'}</button>` : ''}
       </div>
     </div>`;
-  $('#voicingCount').textContent = S.list.length + ' shapes, low to high';
+  const begView = isBeg() && (S.hidden > 0 || S.showAll);
+  $('#voicingCount').textContent = begView && !S.showAll ? 'easiest first' : S.list.length + ' shapes, low to high';
+  const more_ = begView ? `<button class="btn ghost sm" id="btnShapes" style="grid-column:1/-1">${S.showAll ? 'Show only easy shapes' : 'More shapes (' + S.hidden + ')'}</button>` : '';
   $('#voicings').innerHTML = S.list.map((x, i) => `
     <button class="vcard ${i === S.sel ? 'sel' : ''}" data-i="${i}">
       ${D.pref[prefKey(raw)] === F.vKey(x) ? '<span class="star">★</span>' : ''}
       ${diagram(x)}
       <div class="cap">${posCaption(x)}</div>${tagsFor(x, raw)}
-    </button>`).join('');
+    </button>`).join('') + more_;
 }
 function renderMine() {
   const items = Object.entries(D.pref).filter(([k]) => k.startsWith(cfg().tuning + '|')).map(([k, vk]) => ({ name: cl(k.slice(cfg().tuning.length + 1)), vk }));
@@ -397,6 +427,15 @@ const SAMPLES = [
 That saved a [Em]wretch like [D]me
 I [G]once was lost but [C]now am [G]found
 Was [Em]blind but [D]now I [G]see
+` },
+  { id: 's-scar', sample: true, title: 'Scarborough Fair', artist: 'Traditional · uses only Em, G, D, Am', text:
+`{title: Scarborough Fair}
+{artist: Traditional}
+[Verse 1]
+[Em]Are you going to [G]Scarborough [Em]Fair?
+Parsley, [D]sage, rose[Am]mary and [Em]thyme
+[Em]Remember me to [G]one who lives [Em]there
+She [D]once was a [Am]true love of [Em]mine
 ` },
   { id: 's-sun', sample: true, title: 'House of the Rising Sun', artist: 'Traditional · chords above lyrics', text:
 `[Verse 1]
@@ -569,6 +608,7 @@ function settingsModal() {
     <div class="toggles">
       <label class="switch"><span>Left-handed diagrams</span><input type="checkbox" id="stLh" ${c.lh ? 'checked' : ''}><i></i></label>
       <label class="switch"><span>Use flats (B♭) instead of sharps</span><input type="checkbox" id="stFl" ${c.flats ? 'checked' : ''}><i></i></label>
+      <label class="switch"><span>Beginner mode: easy shapes and plain chord names</span><input type="checkbox" id="stBeg" ${isBeg() ? 'checked' : ''}><i></i></label>
       <label class="switch"><span>Sound</span><input type="checkbox" id="stSnd" ${c.sound ? 'checked' : ''}><i></i></label>
       <label class="switch"><span>Teacher mode: pick the primary voicing</span><input type="checkbox" id="stTeach" ${TP.on ? 'checked' : ''}><i></i></label>
     </div>
@@ -594,6 +634,7 @@ function settingsModal() {
     $('#stLh', b).onchange = e => { c.lh = e.target.checked; apply(); };
     $('#stFl', b).onchange = e => { c.flats = e.target.checked; apply(); };
     $('#stLang', b).onclick = e => { const x = e.target.closest('[data-l]'); if (x) setLang(x.dataset.l); };
+    $('#stBeg', b).onchange = e => { c.beginner = e.target.checked; S.showAll = false; save(); buildKeys(); applyBeg(); updateChord(); renderFind(); };
     $('#stSnd', b).onchange = e => { c.sound = e.target.checked; save(); };
     $('#stTeach', b).onchange = e => { TP.on = e.target.checked; LS.set('fw.teacher.on', TP.on); teacherBody(); refreshAll(); settingsModal(); };
     if ($('#tcExport', b)) {
@@ -786,7 +827,10 @@ function identify(frets) {
 function renderFind() {
   const board = $('#findBoard'); if (!board) return;
   const tun = F.TUNINGS[cfg().tuning], names = cfg().flats ? F.FLAT : F.SHARP, lh = cfg().lh;
-  const id = identify(FD.frets); FD.res = id.res;
+  const id = identify(FD.frets);
+  let hiddenNames = 0;
+  if (isBeg() && !FD.all) { const plain = id.res.filter(r => !r.inv && ['', 'm', '7'].includes(r.chord.suffix)); hiddenNames = id.res.length - plain.length; id.res = plain; }
+  FD.res = id.res;
   const top = id.res[0], fr = FD.frets, fg = F.fingering(fr);
   const v = { frets: fr.slice(), fingers: fg.fingers, barre: fg.barre, base: FD.base,
     notes: fr.map((f, s) => { if (f < 0) return null; const pc = (tun[s] + f) % 12, t = top && top.chord.tones.find(x => x.pc === pc); return { name: (SK && pc === 10) ? 'Bb' : names[pc], label: t ? t.label : '' }; }) };
@@ -803,7 +847,7 @@ function renderFind() {
   $('#fdNotes').innerHTML = 'Strings, low to high: ' + sounded.map(n => `<b>${n === 'x' ? '✕' : sharpen(nn(n))}</b>`).join(' · ');
   const nPlayed = fr.filter(f => f >= 0).length;
   $('#findRes').innerHTML = !id.res.length
-    ? `<div class="empty">${nPlayed < 2 ? 'Place a few fingers on the neck and the chord names will show up here.' : 'No standard chord matches these notes. Try moving a finger, or muting a string with the circle above it.'}</div>`
+    ? `<div class="empty">${hiddenNames ? 'Not a common chord yet. Try moving a finger, or <button class="btn sm ghost" id="fdAll">show the technical names</button>' : nPlayed < 2 ? 'Place a few fingers on the neck and the chord names will show up here.' : 'No standard chord matches these notes. Try moving a finger, or muting a string with the circle above it.'}</div>`
     : id.res.map((r, i) => `<div class="res"><div class="rn"><b>${esc(sharpen(r.name))}</b><span>${esc(r.chord.notes.map(n => sharpen(nn(n))).join(' – '))}</span>
         <em class="${r.missing.length ? 'part' : 'full'}">${r.missing.length ? 'no ' + esc(r.missing.map(sharpen).join(', ')) : 'complete'}${r.inv ? ' · inversion' : ''}</em></div>
         <div class="ra"><button class="btn sm" data-fopen="${i}">Open</button><button class="btn sm ghost" data-fsave="${i}" title="Use this shape for ${esc(r.name)} in my songs">★</button></div></div>`).join('');
@@ -1164,6 +1208,15 @@ function tourClose() {
   LS.set('fw.tourSeen', 1);
 }
 
+function askLevel(done) {
+  openModal(`<h2>Welcome to Fretwork</h2><p class="note">How much guitar have you played?</p>
+    <div class="row" style="flex-direction:column;gap:8px;margin-top:10px">
+      <button class="btn primary" data-lv="1">I'm new: keep it simple</button>
+      <button class="btn" data-lv="0">I've played before: show everything</button></div>
+    <p class="note" style="margin-top:10px">You can change this any time in Settings.</p>`, b => {
+    b.onclick = e => { const x = e.target.closest('[data-lv]'); if (!x) return; cfg().beginner = x.dataset.lv === '1'; save(); S.showAll = false; closeModal(); buildKeys(); applyBeg(); setChordText(isBeg() ? 'Em' : 'Am7'); done(); };
+  });
+}
 function init() {
   buildKeys(); renderSongList(); renderMine(); updateWho();
   $('#chordIn').value = S.text; updateChord();
@@ -1184,6 +1237,7 @@ function init() {
     setChordText(nn(sp.root.name) + skS(c.dataset.suf) + sp.bass);
   });
   $('#voicings').addEventListener('click', e => {
+    if (e.target.closest('#btnShapes')) { S.showAll = !S.showAll; updateChord(); return; }
     const b = e.target.closest('.vcard'); if (!b) return;
     S.sel = +b.dataset.i; renderChord(); strum(S.list[S.sel]);
     $('#detail').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1194,6 +1248,7 @@ function init() {
       toast(primaryKey(S.text) ? S.text + ': this shape is now the primary voicing' : 'Primary cleared for ' + S.text);
       refreshAll(); return;
     }
+    if (e.target.closest('#btnLearn')) { toggleLearned(S.text); renderChord(); return; }
     if (e.target.closest('#btnTheory')) { thOpen(S.text); return; }
     if (e.target.closest('#btnPlay') || e.target.closest('#detailDia')) { strum(S.list[S.sel]); return; }
     const m = e.target.closest('[data-mode]'); if (m) { cfg().label = m.dataset.mode; save(); renderChord(); return; }
@@ -1207,6 +1262,11 @@ function init() {
   $('#mine').addEventListener('click', e => { const o = e.target.closest('[data-open]'); if (o) { setChordText(o.dataset.open); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
   document.addEventListener('click', e => { const o = e.target.closest('#mine [data-open]'); if (o) e.stopImmediatePropagation(); }, true);
 
+  $('#startCard').addEventListener('click', e => {
+    const l = e.target.closest('[data-learn]'); if (l) { toggleLearned(l.dataset.learn); return; }
+    const o = e.target.closest('[data-st]'); if (o) { setChordText(cl(o.dataset.st)); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+    const sg = e.target.closest('[data-song]'); if (sg) openSong(sg.dataset.song);
+  });
   $('#btnImport').onclick = () => importModal();
   $('#songList').onclick = $('#sampleList').onclick = e => { const b = e.target.closest('[data-song]'); if (b) openSong(b.dataset.song); };
   $('#btnBack').onclick = () => { showView('songs'); renderSongList(); };
@@ -1227,8 +1287,11 @@ function init() {
   $('#btnHelp').onclick = tourOpen;
   $('#btnHelp2').onclick = tourOpen;
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#tour').hidden) tourClose(); });
-  if (!LS.get('fw.tourSeen', false)) setTimeout(tourOpen, 700);
+  const afterAsk = () => { if (!LS.get('fw.tourSeen', false)) setTimeout(tourOpen, 400); };
+  if (cfg().beginner == null && !D.songs.length && !Object.keys(D.pref).length) setTimeout(() => askLevel(afterAsk), 500);
+  else { if (cfg().beginner == null) { cfg().beginner = false; save(); buildKeys(); applyBeg(); } afterAsk(); }
   initFind();
+  applyBeg();
   initTheory();
   initTeacher();
   tuneBar();

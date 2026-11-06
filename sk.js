@@ -18,6 +18,14 @@ const D = {
   'Am7, F#m7b5, Cmaj9/E …': 'Ami7, Fismi7b5, Cmaj9/H …',
   'major': 'dur', 'minor': 'mol',
   'Fewer ▴': 'Menej ▴',
+  'Beginner mode: easy shapes and plain chord names': 'Režim pre začiatočníkov: ľahké hmaty a jednoduché názvy akordov',
+  'Welcome to Fretwork': 'Vitaj vo Fretwork',
+  'How much guitar have you played?': 'Koľko si už hral na gitare?',
+  "I'm new: keep it simple": 'Som nový: nech je to jednoduché',
+  "I've played before: show everything": 'Už som hral: ukáž všetko',
+  'You can change this any time in Settings.': 'Dá sa to kedykoľvek zmeniť v Nastaveniach.',
+  'Show only easy shapes': 'Zobraziť len ľahké hmaty',
+  'easiest first': 'najľahšie prvé',
   '▶ New here? How to read a chord diagram': '▶ Začínaš s hraním? Ako čítať akordový diagram',
   'Tap a root note and a quality above, or type any chord, however strange.': 'Ťukni hore na základný tón a druh akordu, alebo napíš akýkoľvek akord, aj ten najčudnejší.',
   'Other voicings': 'Ďalšie tvary', 'My voicings': 'Moje tvary',
@@ -242,6 +250,7 @@ const D = {
 
 /* patterns for dynamic text: [regex, replacement string or function] (the regex is run on the trimmed text) */
 const P = [
+  [/^More shapes \((\d+)\)$/, 'Ďalšie hmaty ($1)'],
   [/^More chord types \((\d+)\) ▾$/, 'Ďalšie druhy akordov ($1) ▾'],
   [/^(\d+) shapes, low to high$/, '$1 tvarov, od najnižšieho po najvyšší'],
   [/^Starts at fret (\d+)$/, 'Začína na $1. pražci'],
