@@ -1232,6 +1232,9 @@ function init() {
   initTheory();
   initTeacher();
   tuneBar();
+  $('#wip').innerHTML = SK
+    ? '<b>Rozpracované.</b> Spätná väzba vítaná: <a href="mailto:gitara@lesson.sk">gitara@lesson.sk</a>'
+    : '<b>Work in progress.</b> Feedback welcome: <a href="mailto:guitar@lesson.sk">guitar@lesson.sk</a>';
   $('#tuneBar').addEventListener('click', e => {
     if (e.target.id === 'tbChange') settingsModal();
     if (e.target.id === 'tbStd') { cfg().tuning = 'Standard (E A D G B E)'; save(); VC.clear(); buildKeys(); updateChord(); renderFind(); renderTheory(); renderMine(); renderSongList(); if (S.song && $('#v-song').classList.contains('on')) renderSong(); }

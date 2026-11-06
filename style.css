@@ -323,3 +323,8 @@ body.alt-tuning .deck{box-shadow:0 8px 14px -10px #000,inset 0 -3px 0 #f0a93a}
 .skcard tr.hl td{background:#f6e2a066}
 
 .usual{font-weight:400;opacity:.7;font-size:.75em;white-space:nowrap}
+
+/* ---------- work-in-progress note ---------- */
+.wip{margin:10px 12px 0;padding:8px 14px;border-radius:10px;font-size:.9rem;text-align:center;color:#f2e6cd;background:#2f2822;border:1px dashed #c9a24a99}
+.wip b{color:#f6e2a0}
+.wip a{color:#f6e2a0;font-weight:700;text-decoration:underline}
