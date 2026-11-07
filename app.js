@@ -1512,7 +1512,6 @@ function init() {
     if (e.target.closest('#btnShapes')) { S.showAll = !S.showAll; updateChord(); return; }
     const b = e.target.closest('.vcard'); if (!b) return;
     S.sel = +b.dataset.i; renderChord(); strum(S.list[S.sel]);
-    $('#detail').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
   $('#detail').addEventListener('click', e => {
     if (e.target.closest('#btnPrimary')) {
