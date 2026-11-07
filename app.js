@@ -54,7 +54,7 @@ function registerCustoms() {
 function load(uid) {
   const d = LS.get('fw.data.' + uid, null) || DEFAULTS();
   d.settings = Object.assign(DEFAULTS().settings, d.settings || {});
-  d.songs = d.songs || []; d.pref = d.pref || {};
+  d.songs = d.songs || []; d.pref = d.pref || {}; d.progs = d.progs || [];
   return d;
 }
 const save = () => { LS.set('fw.data.' + A.uid, D); cloudPush(); tuneBar(); };
@@ -107,6 +107,7 @@ async function cloudEnter(user, copyGuest) {
     const ids = new Set(merged.songs.map(s => s.id));
     D.songs.forEach(s => { if (!ids.has(s.id)) merged.songs.push(s); });
     merged.pref = Object.assign({}, D.pref, merged.pref);
+    merged.progs = (merged.progs || []).concat((D.progs || []).filter(p => !(merged.progs || []).some(q => q.id === p.id)));
   }
   LS.set('fw.data.' + uid, merged);
   switchUser(uid);
@@ -196,7 +197,8 @@ function preferred(name) {
   const k = TP.on ? (primaryKey(name) || D.pref[prefKey(name)]) : (D.pref[prefKey(name)] || primaryKey(name));   // teacher mode previews what everyone sees
   let v = k && list.find(x => F.vKey(x) === k);
   if (!v && k) { const fr = k.split('-').map(x => x === 'x' ? -1 : +x); if (fr.length === 6 && fr.every(Number.isFinite)) v = voicingFromFrets(fr, out.chord); }
-  v = v || list.find(x => x.rank === 0) || list[0];
+  const vis = shownOnly(name, list);
+  v = v || vis.find(x => x.rank === 0) || vis[0];
   if (v && out.chord.bass) v.slashBass = out.chord.bass.name;
   return v;
 }
@@ -298,11 +300,10 @@ const S = { showAll: false, text: isBeg() ? 'Em' : 'Am7', chord: null, list: [],
 
 function rootName(pc) { return F.pcLoc(pc, cfg().flats); }
 function buildKeys() {
-  $('#rootKeys').innerHTML = ROOTS.map(pc => {
-    const nat = [0, 2, 4, 5, 7, 9, 11].includes(pc), main = rootName(pc);
-    const alt = main === nn(F.FLAT[pc]) ? nn(F.SHARP[pc]) : nn(F.FLAT[pc]);
-    return `<button class="key ${nat ? 'w' : 'b'}" data-pc="${pc}" aria-label="${main}">${sharpen(main)}${nat ? '' : `<small>${sharpen(alt)}</small>`}</button>`;
-  }).join('');
+  const WH = [0, 2, 4, 5, 7, 9, 11], BL = [[1, 0], [3, 1], [6, 3], [8, 4], [10, 5]];   // black key: [pc, index of the white key to its left]
+  const lab = pc => { const main = rootName(pc), alt = main === nn(F.FLAT[pc]) ? nn(F.SHARP[pc]) : nn(F.FLAT[pc]); return { main, alt }; };
+  $('#rootKeys').innerHTML = WH.map(pc => { const l = lab(pc); return `<button class="key w" data-pc="${pc}" aria-label="${l.main}">${sharpen(l.main)}</button>`; }).join('')
+    + BL.map(([pc, wi]) => { const l = lab(pc); return `<button class="key b" data-pc="${pc}" aria-label="${l.main}" style="left:${((wi + 1) / 7 * 100 - 4.2).toFixed(2)}%">${sharpen(l.main)}</button>`; }).join('');
   const BASIC = isBeg() ? ['', 'm', '7', '5'] : ['', 'm', '7', 'maj7', 'm7', 'sus2', 'sus4', '5'];
   const chip = ([v, l], cls) => `<button class="chip ${cls}" data-suf="${v}">${l === 'major' ? 'major' : sharpen(skS(l))}</button>`;
   const basic = SUFFIXES.filter(x => BASIC.includes(x[0])), more = SUFFIXES.filter(x => !BASIC.includes(x[0])), open = !!cfg().more;
@@ -330,7 +331,7 @@ function updateChord() {
   const info = $('#chordInfo');
   if (!raw) { S.chord = null; S.list = []; info.className = 'status'; info.innerHTML = ''; $('#chordResult').hidden = true; $('#chordHint').textContent = 'Tap a root note and a quality above, or type any chord, however strange.'; return; }
   const out = voicingsFor(raw);
-  S.chord = out.chord; S.list = out.list.slice();
+  S.chord = out.chord; S.list = shownOnly(raw, out.list.slice());
   if (!out.chord.ok) { info.className = 'status err'; info.textContent = out.chord.error; $('#chordResult').hidden = true; $('#chordHint').textContent = ''; return; }
   $('#chordHint').textContent = '';
   if (!out.list.length) { info.className = 'status err'; info.textContent = 'That chord is parsed (' + out.chord.notes.map(nn).join(' – ') + ') but I couldn’t find a playable shape in this tuning.'; $('#chordResult').hidden = true; return; }
@@ -353,6 +354,7 @@ function posCaption(v) { return v.pos === 0 ? 'Open position' : 'Starts at fret 
 function tagsFor(v, name) {
   let t = '';
   if (name && primaryKey(name) === F.vKey(v)) t += '<span class="tag gold">Recommended</span> ';
+  if (TP.on && name && hiddenFor(name).includes(F.vKey(v))) t += '<span class="tag">Hidden from students</span> ';
   if (v.barre) t += '<span class="tag">Barre</span> ';
   else if (v.fingerCount <= 3 && v.pos <= 3) t += '<span class="tag">Easy</span> ';
   if (v.omits.length) t += `<span class="tag">no ${esc(v.omits.map(sharpen).join(', '))}</span>`;
@@ -397,14 +399,16 @@ function renderChord() {
         <button class="btn primary" id="btnPlay">▶ Strum</button>
         <button class="btn" id="btnPref">${isPref ? '★ My voicing' : '☆ Use in my songs'}</button>
         ${isBeg() ? `<button class="btn" id="btnLearn">${learned(canon(raw)) ? '✓ I can play this' : 'Mark as learned'}</button>` : '<button class="btn ghost" id="btnTheory">Theory ›</button>'}
-        ${TP.on ? `<button class="btn teach" id="btnPrimary">${isPrim ? '◆ Primary (tap to clear)' : '◆ Make primary'}</button>` : ''}
+        ${TP.on ? `<button class="btn teach" id="btnPrimary">${isPrim ? '◆ Primary (tap to clear)' : '◆ Make primary'}</button>
+        <button class="btn teach" id="btnHide">${hiddenFor(raw).includes(F.vKey(v)) ? '◇ Show this shape again' : '◇ Hide this shape'}</button>
+        <button class="btn teach" id="btnResetChord">↺ Reset this chord</button>` : ''}
       </div>
     </div>`;
   const begView = isBeg() && (S.hidden > 0 || S.showAll);
   $('#voicingCount').textContent = begView && !S.showAll ? 'easiest first' : S.list.length + ' shapes, low to high';
   const more_ = begView ? `<button class="btn ghost sm" id="btnShapes" style="grid-column:1/-1">${S.showAll ? 'Show only easy shapes' : 'More shapes (' + S.hidden + ')'}</button>` : '';
   $('#voicings').innerHTML = S.list.map((x, i) => `
-    <button class="vcard ${i === S.sel ? 'sel' : ''}" data-i="${i}">
+    <button class="vcard ${i === S.sel ? 'sel' : ''} ${TP.on && hiddenFor(raw).includes(F.vKey(x)) ? 'hid' : ''}" data-i="${i}">
       ${D.pref[prefKey(raw)] === F.vKey(x) ? '<span class="star">★</span>' : ''}
       ${diagram(x)}
       <div class="cap">${posCaption(x)}</div>${tagsFor(x, raw)}
@@ -489,8 +493,103 @@ function renderPlayable() {
         <a class="btn sm ghost" href="https://duckduckgo.com/?q=${q}" target="_blank" rel="noopener noreferrer">Find chords ↗</a></div>`;
     }).join('')}`;
 }
+
+/* ================= progressions: save a chord sequence and play it ================= */
+const PG = { tok: 0 };
+const pgChordOk = n => { const o = voicingsFor(cl(n)); return o.chord.ok && o.list.length > 0; };
+function renderProgs() {
+  const el = $('#progs'); if (!el) return;
+  const L = D.progs || [];
+  el.innerHTML = `<div class="rowbar"><h3 class="sect" style="margin:0">Progressions</h3><button class="btn sm" id="pgNew">＋ New progression</button></div>`
+    + (L.length ? L.map(p => `<div class="scard prow"><b>${esc(p.name || 'Untitled')}</b>
+        <div class="mini">${p.chords.map(c => `<span class="pill">${esc(sharpen(cl(c)))}</span>`).join('')}</div>
+        <div class="row"><button class="btn sm primary" data-pgplay="${esc(p.id)}">▶ Play</button><button class="btn sm ghost" data-pgedit="${esc(p.id)}">Edit</button></div></div>`).join('')
+      : '<p class="note" style="margin:6px 0 10px">Save a sequence of chords, such as Em C G D, and let the app play it for you to practise along.</p>');
+}
+function pgEdit(id, seed) {
+  const ex = (D.progs || []).find(p => p.id === id);
+  let seq = ex ? ex.chords.slice() : (seed && seed.chords ? seed.chords.slice() : []);
+  const nameInit = ex ? ex.name : (seed && seed.name) || '';
+  const quick = ['Em', 'Am', 'D', 'G', 'C', 'A', 'E', 'Dm'];
+  openModal(`<h2>${ex ? 'Edit progression' : 'New progression'}</h2>
+    <label class="field"><span>Name</span><input id="pgName" value="${esc(nameInit)}" placeholder="e.g. My first four" maxlength="50"></label>
+    <div class="field"><span>Chords in order</span><div class="seqrow" id="pgSeq"></div></div>
+    <div class="inputrow"><div class="engraved"><input id="pgIn" placeholder="Add a chord, e.g. Em" autocomplete="off" autocapitalize="off" spellcheck="false"></div><button class="btn" id="pgAdd">Add</button></div>
+    <div class="chiprow" id="pgQuick" style="margin:8px 0">${quick.map(q => `<button class="chip" data-q="${q}">${esc(sharpen(cl(q)))}</button>`).join('')}</div>
+    <div class="row">${ex ? '<button class="btn danger" id="pgDel">Delete</button>' : ''}<span class="grow"></span><button class="btn" data-close>Cancel</button><button class="btn primary" id="pgSave">Save</button></div>`, b => {
+    const draw = () => {
+      $('#pgSeq', b).innerHTML = seq.length ? seq.map((c, i) => `<span class="seqchip"><button data-mv="${i}:-1" aria-label="Move left">‹</button><b>${esc(sharpen(cl(c)))}</b><button data-mv="${i}:1" aria-label="Move right">›</button><button data-rm="${i}" aria-label="Remove">✕</button></span>`).join('') : '<span class="note">Nothing yet. Add chords below.</span>';
+    };
+    const add = name => {
+      name = name.trim(); if (!name) return;
+      const en = canon(name);
+      if (!pgChordOk(en)) { toast('I can’t find a playable shape for “' + name + '”'); return; }
+      seq.push(en); draw(); $('#pgIn', b).value = '';
+    };
+    draw();
+    $('#pgAdd', b).onclick = () => add($('#pgIn', b).value);
+    $('#pgIn', b).addEventListener('keydown', e => { if (e.key === 'Enter') add($('#pgIn', b).value); });
+    $('#pgQuick', b).onclick = e => { const q = e.target.closest('[data-q]'); if (q) add(cl(q.dataset.q)); };
+    $('#pgSeq', b).onclick = e => {
+      const m = e.target.closest('[data-mv]'), r = e.target.closest('[data-rm]');
+      if (m) { const [i, d] = m.dataset.mv.split(':').map(Number), j = i + d; if (j >= 0 && j < seq.length) { [seq[i], seq[j]] = [seq[j], seq[i]]; draw(); } }
+      if (r) { seq.splice(+r.dataset.rm, 1); draw(); }
+    };
+    $('#pgSave', b).onclick = () => {
+      if (!seq.length) { toast('Add at least one chord'); return; }
+      const name = $('#pgName', b).value.trim() || seq.slice(0, 4).map(c => cl(c)).join(' ');
+      D.progs = D.progs || [];
+      if (ex) { ex.name = name; ex.chords = seq; } else D.progs.unshift({ id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4), name, chords: seq });
+      save(); closeModal(); renderProgs(); toast('Progression saved');
+    };
+    if ($('#pgDel', b)) $('#pgDel', b).onclick = () => { if (!confirm('Delete this progression?')) return; D.progs = D.progs.filter(p => p.id !== ex.id); save(); closeModal(); renderProgs(); };
+  });
+}
+function pgClick(strong) {
+  if (!cfg().sound) return; const c = actx(); if (!c) return;
+  const o = c.createOscillator(), g = c.createGain(), t = c.currentTime + 0.01;
+  o.frequency.value = strong ? 1500 : 1000; g.gain.setValueAtTime(strong ? 0.12 : 0.06, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+  o.connect(g).connect(c.destination); o.start(t); o.stop(t + 0.06);
+}
+function pgPlayer(title, chords) {
+  const c0 = cfg(); c0.pgSpeed = c0.pgSpeed || 2; c0.pgBeats = c0.pgBeats || 4; if (c0.pgLoop == null) c0.pgLoop = true; if (c0.pgClick == null) c0.pgClick = true;
+  const tok = ++PG.tok; let running = false, timer = 0, ci = 0, bt = 0;
+  const alive = () => PG.tok === tok && !$('#modal').hidden;
+  const seg = (id, opts, cur) => `<nav class="seg" id="${id}">${opts.map(([v, l]) => `<button class="seg-b ${cur === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</nav>`;
+  openModal(`<h2>${esc(title)}</h2>
+    <div id="plDia" style="text-align:center;min-height:200px"></div>
+    <div class="notepills" id="plSeq" style="justify-content:center">${chords.map((c, i) => `<span class="pill" data-i="${i}">${esc(sharpen(cl(c)))}</span>`).join('')}</div>
+    <div class="row" style="justify-content:center;margin:12px 0"><button class="btn primary" id="plGo">▶ Play</button></div>
+    <div class="field"><span>Speed</span>${seg('plSpd', [[1, 'Slow'], [2, 'Medium'], [3, 'Fast']], c0.pgSpeed)}</div>
+    <div class="field"><span>Beats per chord</span>${seg('plBts', [[1, '1'], [2, '2'], [4, '4']], c0.pgBeats)}</div>
+    <div class="toggles"><label class="switch"><span>Loop</span><input type="checkbox" id="plLoop" ${c0.pgLoop ? 'checked' : ''}><i></i></label>
+    <label class="switch"><span>Click on each beat</span><input type="checkbox" id="plClk" ${c0.pgClick ? 'checked' : ''}><i></i></label></div>
+    <div class="row"><span class="grow"></span><button class="btn" data-close>Close</button></div>`, b => {
+    const show = i => {
+      const v = preferred(cl(chords[i]));
+      $('#plDia', b).innerHTML = v ? diagram(v, { names: true }) : '';
+      $$('#plSeq .pill', b).forEach((p, k) => p.classList.toggle('root', k === i));
+    };
+    const stop = () => { running = false; clearTimeout(timer); $('#plGo', b).textContent = '▶ Play'; };
+    const step = () => {
+      if (!running || !alive()) { running = false; return; }
+      if (bt === 0) { show(ci); strum(preferred(cl(chords[ci]))); }
+      if (c0.pgClick) pgClick(bt === 0);
+      const ms = [0, 900, 650, 450][c0.pgSpeed];
+      bt++;
+      if (bt >= c0.pgBeats) { bt = 0; ci++; if (ci >= chords.length) { if (c0.pgLoop) ci = 0; else { timer = setTimeout(() => { stop(); ci = 0; }, ms); return; } } }
+      timer = setTimeout(step, ms);
+    };
+    show(0);
+    $('#plGo', b).onclick = () => { if (running) { stop(); return; } running = true; ci = 0; bt = 0; $('#plGo', b).textContent = '■ Stop'; step(); };
+    $('#plSpd', b).onclick = e => { const x = e.target.closest('[data-v]'); if (!x) return; c0.pgSpeed = +x.dataset.v; save(); $$('#plSpd .seg-b', b).forEach(y => y.classList.toggle('on', y === x)); };
+    $('#plBts', b).onclick = e => { const x = e.target.closest('[data-v]'); if (!x) return; c0.pgBeats = +x.dataset.v; bt = 0; save(); $$('#plBts .seg-b', b).forEach(y => y.classList.toggle('on', y === x)); };
+    $('#plLoop', b).onchange = e => { c0.pgLoop = e.target.checked; save(); };
+    $('#plClk', b).onchange = e => { c0.pgClick = e.target.checked; save(); };
+  });
+}
 function renderSongList() {
-  renderPlayable();
+  renderPlayable(); renderProgs();
   $('#songList').innerHTML = D.songs.length ? D.songs.map(songCard).join('') : '<div class="empty">No songs yet. Import one: paste text from any chord site, or open a ChordPro / text file.</div>';
   $('#sampleList').innerHTML = SAMPLES.map(songCard).join('');
 }
@@ -609,6 +708,129 @@ function importModal(song) {
 
 /* ================= settings & profile ================= */
 function setLang(l) { if (l === LANG) return; try { localStorage.setItem('fw.lang', l); } catch (e) {} location.reload(); }
+/* ================= guitar finish (wood colour) ================= */
+const FINISHES = [
+  { id: 'cherry', n: 'Cherry burst', hue: 0, sat: .92, bri: 1 }, { id: 'honey', n: 'Honey burst', hue: 22, sat: 1.05, bri: 1.1 },
+  { id: 'tobacco', n: 'Tobacco', hue: -8, sat: .8, bri: .72 }, { id: 'moss', n: 'Moss', hue: 105, sat: .9, bri: .9 },
+  { id: 'lake', n: 'Lake blue', hue: -160, sat: 1, bri: .95 }, { id: 'plum', n: 'Plum', hue: -75, sat: .95, bri: .9 },
+  { id: 'ebony', n: 'Ebony', hue: 0, sat: .1, bri: .5 }];
+/* ================= style lab: tweak the look live; export look.json to make it everyone's default ================= */
+const LOOK_FIELDS = [
+  ['--ow', 'Outline thickness', 'range', 0, 8, .5, 'px', 4], ['--so', 'Shadow offset', 'range', 0, 12, 1, 'px', 5], ['--rad', 'Roundness', 'range', 0, 30, 1, 'px', 14],
+  ['wob', 'Wobble (hand-drawn)', 'range', 0, 10, .5, '', 4], ['--tilt', 'Tape crookedness', 'range', 0, 5, .1, 'deg', 1.6],
+  ['--ink', 'Outline colour', 'color', 0, 0, 0, '', '#140a06'], ['--c-paper', 'Card colour', 'color', 0, 0, 0, '', '#f1e5be'], ['--c-panel', 'Panel colour', 'color', 0, 0, 0, '', '#201a17'],
+  ['--c-bind', 'Binding colour', 'color', 0, 0, 0, '', '#ecdfc0'], ['--c-btn', 'Button colour', 'color', 0, 0, 0, '', '#e6c365'], ['--c-btn2', 'Main button colour', 'color', 0, 0, 0, '', '#c9503a'],
+  ['--c-hot', 'Highlight colour', 'color', 0, 0, 0, '', '#dc8a3e']];
+const LOOK_FONTS = [['Marker Felt', '"Marker Felt","Bradley Hand","Chalkboard SE","Segoe Print","Comic Sans MS",cursive'], ['Bradley Hand', '"Bradley Hand","Segoe Print","Comic Sans MS",cursive'],
+  ['Chalkboard', '"Chalkboard SE","Comic Sans MS",cursive'], ['Comic Sans', '"Comic Sans MS","Comic Neue",cursive'], ['Plain rounded', 'ui-rounded,"Trebuchet MS",system-ui,sans-serif']];
+let LOOK_SHIPPED = {};
+const LOOK = { local: LS.get('fw.look', {}) };
+const lookNow = () => Object.assign({}, LOOK_SHIPPED, LOOK.local);
+function applyLook() {
+  const L = lookNow(), r = document.documentElement.style;
+  LOOK_FIELDS.forEach(([k, , t, , , , u, d]) => {
+    const v = L[k] != null ? L[k] : d;
+    if (k === 'wob') { const m = document.getElementById('wobbleMap'); if (m) m.setAttribute('scale', v); r.setProperty('--wobf', +v > 0 ? 'url(#wobble)' : 'none'); }
+    else r.setProperty(k, v + u);
+  });
+  const f = LOOK_FONTS.find(x => x[0] === L.font) || LOOK_FONTS[0]; r.setProperty('--hand', f[1]);
+}
+function labOpen() {
+  closeModal(); let el = $('#lab'); if (el) el.remove();
+  el = document.createElement('div'); el.id = 'lab'; el.className = 'lab'; const L = lookNow();
+  el.innerHTML = `<h3>Style lab</h3>` + LOOK_FIELDS.map(([k, n, t, mi, ma, st, u, d]) => `<label><span>${n}</span>${t === 'range' ? `<output>${L[k] != null ? L[k] : d}</output>` : ''}<input data-k="${k}" type="${t}" ${t === 'range' ? `min="${mi}" max="${ma}" step="${st}"` : ''} value="${L[k] != null ? L[k] : d}"></label>`).join('')
+    + `<label><span>Handwriting</span><select data-k="font">${LOOK_FONTS.map(f => `<option ${L.font === f[0] ? 'selected' : ''}>${f[0]}</option>`).join('')}</select></label>
+    <div class="row"><button class="btn sm" id="labCopy">Copy look.json</button><button class="btn sm ghost" id="labDl">Download</button><button class="btn sm danger" id="labReset">Reset</button><button class="btn sm primary" id="labX">Done</button></div>
+    <p style="font-size:.75rem;margin:8px 0 0">Your changes stay on this device. To make them the default for everyone, download look.json and upload it next to index.html.</p>`;
+  document.body.appendChild(el);
+  const set = (k, v, o) => { LOOK.local[k] = v; LS.set('fw.look', LOOK.local); applyLook(); if (o) o.textContent = v; };
+  el.addEventListener('input', e => { const i = e.target.closest('[data-k]'); if (i) set(i.dataset.k, i.type === 'range' ? +i.value : i.value, i.previousElementSibling && i.previousElementSibling.tagName === 'OUTPUT' ? i.previousElementSibling : null); });
+  el.addEventListener('change', e => { const i = e.target.closest('select[data-k]'); if (i) set(i.dataset.k, i.value); });
+  const json = () => JSON.stringify({ v: 1, look: lookNow() }, null, 1);
+  $('#labCopy', el).onclick = () => { try { navigator.clipboard.writeText(json()); toast('look.json copied'); } catch (e) { toast('Could not copy; use Download'); } };
+  $('#labDl', el).onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([json()], { type: 'application/json' })); a.download = 'look.json'; document.body.appendChild(a); a.click(); a.remove(); };
+  $('#labReset', el).onclick = () => { LOOK.local = {}; LS.set('fw.look', {}); applyLook(); labOpen(); };
+  $('#labX', el).onclick = () => el.remove();
+}
+
+/* ================= stickers on the guitar body (anarchy A and friends; make your own) ================= */
+const STK_DEFAULT = [
+  { id: 'a1', kind: 'anarchy', t: '', col: '#c9503a', tc: '#ecdfc0', x: 91, y: 16, s: 120, r: 12 },
+  { id: 'a2', kind: 'burst', t: 'LOUD!', col: '#e6c365', tc: '#140a06', x: 6, y: 72, s: 130, r: -10 },
+  { id: 'a3', kind: 'circle', t: 'ROCK', col: '#ecdfc0', tc: '#140a06', x: 93, y: 80, s: 96, r: 8 },
+  { id: 'a4', kind: 'label', t: 'NO REGRETS', col: '#ecdfc0', tc: '#c9503a', x: 8, y: 20, s: 140, r: -14 }];
+const STK_KINDS = [['circle', 'Circle'], ['burst', 'Burst'], ['star', 'Star'], ['label', 'Label'], ['anarchy', 'Anarchy']];
+const stkList = () => cfg().stickers || STK_DEFAULT;
+function stkSvg(st) {
+  const ink = '#140a06', P = (d, fill, sw = 4) => `<path d="${d}" fill="${fill}" stroke="${ink}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"/>`;
+  let shape = '', body = '';
+  const t = (st.t || '').slice(0, 14), n = t.length;
+  const fs = n <= 2 ? 40 : n <= 4 ? 26 : n <= 7 ? 19 : 14;
+  const txt = (y, size) => `<text x="50" y="${y}" text-anchor="middle" font-family="var(--hand)" font-weight="900" font-size="${size || fs}" fill="${st.tc}" ${n > 8 ? 'textLength="70" lengthAdjust="spacingAndGlyphs"' : ''}>${esc(t)}</text>`;
+  const poly = (k, ro, ri) => 'M' + [...Array(k * 2)].map((_, i) => { const r = i % 2 ? ri : ro, ang = Math.PI * i / k - Math.PI / 2; return (50 + r * Math.cos(ang)).toFixed(1) + ',' + (50 + r * Math.sin(ang)).toFixed(1); }).join(' L') + 'Z';
+  if (st.kind === 'circle') { shape = 'M50 10 a40 40 0 1 0 0.01 0Z'; body = txt(50 + fs * .35); }
+  else if (st.kind === 'burst') { shape = poly(12, 47, 34); body = txt(50 + fs * .35); }
+  else if (st.kind === 'star') { shape = poly(5, 48, 20); body = txt(56 + fs * .2); }
+  else if (st.kind === 'label') { shape = 'M6 30 L94 26 L92 72 L8 70Z'; body = txt(56, n > 8 ? 17 : 22); }
+  else { shape = 'M50 8 a42 42 0 1 0 0.01 0Z'; }
+  let inner = '';
+  if (st.kind === 'anarchy') inner = `<circle cx="50" cy="50" r="33" fill="none" stroke="${st.col}" stroke-width="9"/><path d="M26 86 L50 18 L74 86 M30 62 L70 62" fill="none" stroke="${st.col}" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>`;
+  else inner = P(shape, st.col) + body;
+  const halo = st.kind === 'anarchy' ? `<circle cx="50" cy="50" r="46" fill="${st.tc}" stroke="${ink}" stroke-width="4"/>` : `<path d="${shape}" fill="#f4efe0" stroke="#f4efe0" stroke-width="12" stroke-linejoin="round"/>`;
+  return `<svg viewBox="0 0 100 100" width="${st.s}" height="${st.s}" aria-hidden="true">${halo}${inner}</svg>`;
+}
+let stkEdit = null;
+function stkRender() {
+  let L = $('#stickers'); if (!L) { L = document.createElement('div'); L.id = 'stickers'; document.body.prepend(L); }
+  L.innerHTML = stkList().map(s => `<div class="stk ${stkEdit === s.id ? 'sel' : ''}" data-id="${s.id}" style="left:${s.x}%;top:${s.y}%;transform:translate(-50%,-50%) rotate(${s.r}deg)">${stkSvg(s)}</div>`).join('');
+  requestAnimationFrame(() => L.classList.add('ready'));
+}
+function stkOpen() {
+  closeModal(); const old = $('#stkPanel'); if (old) old.remove();
+  if (!cfg().stickers) cfg().stickers = STK_DEFAULT.map(s => Object.assign({}, s));
+  const L = $('#stickers'); L.classList.add('edit');
+  const el = document.createElement('div'); el.id = 'stkPanel'; el.className = 'lab';
+  const cur = () => cfg().stickers.find(s => s.id === stkEdit);
+  const draw = () => {
+    const s = cur(), list = cfg().stickers;
+    el.innerHTML = `<h3>Stickers</h3><p style="font-size:.8rem;margin:0 0 6px">Stickers sit behind everything. Drag a visible one to move it, or use Across and Down. Tap a number to pick a sticker.</p>
+      <div class="stkl">${list.map((x, i) => `<button class="${x.id === stkEdit ? 'on' : ''}" data-sel="${x.id}">${i + 1}</button>`).join('')}<button data-add="1">＋</button></div>
+      ${s ? `<label><span>Text</span><input data-f="t" value="${esc(s.t)}" maxlength="14" ${s.kind === 'anarchy' ? 'disabled' : ''} style="grid-column:1/-1;padding:6px;border:3px solid var(--ink);border-radius:8px"></label>
+      <label><span>Shape</span><select data-f="kind">${STK_KINDS.map(([k, n]) => `<option value="${k}" ${s.kind === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      <label><span>Fill colour</span><input type="color" data-f="col" value="${s.col}"></label>
+      <label><span>Text colour</span><input type="color" data-f="tc" value="${s.tc}"></label>
+      <label><span>Size</span><output>${s.s}</output><input type="range" data-f="s" min="40" max="240" step="2" value="${s.s}"></label>
+      <label><span>Turn</span><output>${s.r}</output><input type="range" data-f="r" min="-45" max="45" step="1" value="${s.r}"></label>
+      <label><span>Across</span><output>${s.x}</output><input type="range" data-f="x" min="0" max="100" step="1" value="${s.x}"></label>
+      <label><span>Down</span><output>${s.y}</output><input type="range" data-f="y" min="0" max="100" step="1" value="${s.y}"></label>
+      <div class="row"><button class="btn sm danger" data-del="1">Delete</button></div>` : ''}
+      <div class="row"><button class="btn sm ghost" data-reset="1">Reset to default</button><button class="btn sm primary" data-done="1">Done</button></div>`;
+  };
+  if (!stkEdit) stkEdit = cfg().stickers[0] && cfg().stickers[0].id;
+  draw(); document.body.appendChild(el); stkRender();
+  el.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.sel) stkEdit = b.dataset.sel;
+    else if (b.dataset.add) { const s = { id: 's' + Date.now().toString(36), kind: 'circle', t: 'YES', col: '#e6c365', tc: '#140a06', x: 50, y: 50, s: 100, r: 0 }; cfg().stickers.push(s); stkEdit = s.id; save(); }
+    else if (b.dataset.del) { cfg().stickers = cfg().stickers.filter(s => s.id !== stkEdit); stkEdit = cfg().stickers[0] && cfg().stickers[0].id; save(); }
+    else if (b.dataset.reset) { delete cfg().stickers; save(); stkEdit = null; el.remove(); L.classList.remove('edit'); stkRender(); return; }
+    else if (b.dataset.done) { el.remove(); L.classList.remove('edit'); stkEdit = null; stkRender(); return; }
+    else return;
+    draw(); stkRender();
+  });
+  const upd = e => { const f = e.target.dataset.f, s = cur(); if (!f || !s) return; s[f] = e.target.type === 'range' ? +e.target.value : e.target.value; const o = e.target.previousElementSibling; if (o && o.tagName === 'OUTPUT') o.textContent = s[f]; stkRender(); };
+  el.addEventListener('input', upd);
+  el.addEventListener('change', e => { upd(e); if (e.target.dataset.f === 'kind') draw(); save(); });
+  // drag stickers on the page
+  let drag = null;
+  L.onpointerdown = e => { const d = e.target.closest('.stk'); if (!d) return; stkEdit = d.dataset.id; drag = { id: d.dataset.id }; d.setPointerCapture(e.pointerId); draw(); stkRender(); e.preventDefault(); };
+  L.onpointermove = e => { if (!drag) return; const s = cfg().stickers.find(x => x.id === drag.id); s.x = +(e.clientX / innerWidth * 100).toFixed(1); s.y = +(e.clientY / innerHeight * 100).toFixed(1); const d = L.querySelector(`[data-id="${s.id}"]`); if (d) { d.style.left = s.x + '%'; d.style.top = s.y + '%'; } };
+  L.onpointerup = () => { if (drag) { drag = null; save(); stkRender(); } };
+}
+function applyFinish() {
+  const f = Object.assign({ hue: 0, sat: .92, bri: 1 }, cfg().finish || {}), r = document.documentElement.style;
+  r.setProperty('--hue', f.hue + 'deg'); r.setProperty('--wsat', f.sat); r.setProperty('--wbri', f.bri);
+}
 function settingsModal() {
   const c = cfg(), c0 = F.TUNINGS[c.tuning];
   openModal(`<h2>Settings</h2>
@@ -620,6 +842,10 @@ function settingsModal() {
     </details>
     <div class="field"><span>Language</span><nav class="seg" id="stLang">${[['en', 'English'], ['sk', 'Slovenčina']].map(([l, n]) => `<button class="seg-b ${LANG === l ? 'on' : ''}" data-l="${l}">${n}</button>`).join('')}</nav></div>
     <div class="field"><span>Dot labels</span><nav class="seg" id="stLabel">${[['finger', 'Fingers'], ['note', 'Notes'], ['interval', 'Intervals']].map(([m, l]) => `<button class="seg-b ${c.label === m ? 'on' : ''}" data-m="${m}">${l}</button>`).join('')}</nav></div>
+    <div class="field"><span>Guitar finish</span>
+      <div class="finish" id="stFin">${FINISHES.map(p => `<button class="fin" data-f="${p.id}" aria-label="${p.n}" title="${p.n}" style="--h:${p.hue}deg;--s:${p.sat};--b:${p.bri}"></button>`).join('')}</div>
+      <label class="field" style="margin:0"><span>Colour shift</span><input type="range" id="stHue" min="-180" max="180" value="${(c.finish && c.finish.hue) || 0}"></label></div>
+    <div class="field row"><button class="btn sm" id="stLab">Tweak the look (style lab)</button><button class="btn sm" id="stStk">Stickers</button></div>
     <div class="toggles">
       <label class="switch"><span>Left-handed diagrams</span><input type="checkbox" id="stLh" ${c.lh ? 'checked' : ''}><i></i></label>
       <label class="switch"><span>Use flats (B♭) instead of sharps</span><input type="checkbox" id="stFl" ${c.flats ? 'checked' : ''}><i></i></label>
@@ -627,8 +853,8 @@ function settingsModal() {
       <label class="switch"><span>Sound</span><input type="checkbox" id="stSnd" ${c.sound ? 'checked' : ''}><i></i></label>
       <label class="switch"><span>Teacher mode: pick the primary voicing</span><input type="checkbox" id="stTeach" ${TP.on ? 'checked' : ''}><i></i></label>
     </div>
-    ${TP.on ? `<div class="field"><span>Primary voicings (${Object.keys(primaryMerged()).length})</span>
-      <p class="note">Open a chord and press “Make primary” under its diagram. Primary shapes show as Recommended and open first for everyone. Export the file and save it as <b>primary.json</b> next to index.html to publish your picks.</p>
+    ${TP.on ? `<div class="field"><span>Primary voicings (${Object.keys(primaryMerged()).length}) · hidden shapes (${Object.values(hiddenMerged()).reduce((n, a) => n + a.length, 0)})</span>
+      <p class="note">Open a chord and press “Make primary” under its diagram, or “Hide this shape” to remove a shape for everyone else (you still see it, dimmed). “Reset this chord” clears both. Primary shapes show as Recommended and open first for everyone. Export the file and save it as <b>primary.json</b> next to index.html to publish your picks.</p>
       <div class="row" style="margin-top:6px"><button class="btn sm" id="tcExport">Export primary.json</button>
       <label class="btn sm ghost" style="display:inline-flex;align-items:center">Import<input type="file" id="tcImport" accept="application/json,.json" hidden></label>
       <button class="btn sm danger" id="tcClear">Clear my changes</button></div></div>` : ''}
@@ -649,13 +875,19 @@ function settingsModal() {
     $('#stLh', b).onchange = e => { c.lh = e.target.checked; apply(); };
     $('#stFl', b).onchange = e => { c.flats = e.target.checked; apply(); };
     $('#stLang', b).onclick = e => { const x = e.target.closest('[data-l]'); if (x) setLang(x.dataset.l); };
+    const fin = () => (c.finish = Object.assign({ hue: 0, sat: .92, bri: 1 }, c.finish || {}));
+    $('#stFin', b).onclick = e => { const x = e.target.closest('[data-f]'); if (!x) return; const p = FINISHES.find(q => q.id === x.dataset.f); Object.assign(fin(), { hue: p.hue, sat: p.sat, bri: p.bri }); $('#stHue', b).value = p.hue; save(); applyFinish(); };
+    $('#stLab', b).onclick = labOpen;
+    $('#stStk', b).onclick = stkOpen;
+    $('#stHue', b).oninput = e => { fin().hue = +e.target.value; applyFinish(); };
+    $('#stHue', b).onchange = () => save();
     $('#stBeg', b).onchange = e => { c.beginner = e.target.checked; S.showAll = false; save(); buildKeys(); applyBeg(); updateChord(); renderFind(); };
     $('#stSnd', b).onchange = e => { c.sound = e.target.checked; save(); };
     $('#stTeach', b).onchange = e => { TP.on = e.target.checked; LS.set('fw.teacher.on', TP.on); teacherBody(); refreshAll(); settingsModal(); };
     if ($('#tcExport', b)) {
       $('#tcExport', b).onclick = exportPrimary;
       $('#tcImport', b).onchange = importPrimary;
-      $('#tcClear', b).onclick = () => { if (!confirm('Remove all primary-voicing changes made on this device?')) return; TP.local = {}; LS.set('fw.teacher.primary', TP.local); refreshAll(); settingsModal(); };
+      $('#tcClear', b).onclick = () => { if (!confirm('Remove all primary-voicing changes made on this device?')) return; TP.local = {}; TH.local = {}; LS.set('fw.teacher.primary', TP.local); LS.set('fw.teacher.hidden', TH.local); refreshAll(); settingsModal(); };
     }
   });
 }
@@ -795,6 +1027,7 @@ async function importBackup(e) {
     const ids = new Set(D.songs.map(s => s.id));
     (j.data.songs || []).forEach(s => { if (!ids.has(s.id)) D.songs.push(s); });
     Object.assign(D.pref, j.data.pref || {});
+    D.progs = D.progs || []; (j.data.progs || []).forEach(p => { if (!D.progs.some(q => q.id === p.id)) D.progs.push(p); });
     save(); renderSongList(); renderMine(); closeModal(); toast('Backup imported');
   } catch (err) { toast('That file is not a Fretwork backup'); }
 }
@@ -1050,6 +1283,25 @@ function initTheory() {
 /* ================= Teacher mode: choose the primary (recommended) voicing ================= */
 let PRIMARY = {};                                                   // shipped with the app (primary.json)
 const TP = { local: LS.get('fw.teacher.primary', {}), on: LS.get('fw.teacher.on', false) };   // this device's edits
+let HIDDEN = {};                                                    // shipped hidden shapes (primary.json "hidden")
+const TH = { local: LS.get('fw.teacher.hidden', {}) };
+function hiddenFor(name) { const k = prefKey(name); return k in TH.local ? TH.local[k] : (HIDDEN[k] || []); }
+function hiddenMerged() { const m = Object.assign({}, HIDDEN); Object.entries(TH.local).forEach(([k, a]) => { if (a && a.length) m[k] = a; else delete m[k]; }); return m; }
+function shownOnly(name, list) {   // everyone but the teacher loses hidden shapes (never all of them)
+  if (TP.on) return list;
+  const hs = hiddenFor(name); if (!hs.length) return list;
+  const out = list.filter(x => !hs.includes(F.vKey(x))); return out.length ? out : list;
+}
+function toggleHidden(name, v) {
+  const k = prefKey(name), vk = F.vKey(v), a = hiddenFor(name).slice(), i = a.indexOf(vk);
+  if (i >= 0) a.splice(i, 1); else { a.push(vk); if (primaryKey(name) === vk) TP.local[k] = null; }
+  TH.local[k] = a; LS.set('fw.teacher.hidden', TH.local); LS.set('fw.teacher.primary', TP.local);
+  return i < 0;
+}
+function resetChordTeacher(name) {
+  const k = prefKey(name); TP.local[k] = null; TH.local[k] = [];
+  LS.set('fw.teacher.primary', TP.local); LS.set('fw.teacher.hidden', TH.local);
+}
 function primaryKey(name) { const k = prefKey(name); return k in TP.local ? TP.local[k] : (PRIMARY[k] || null); }
 function primaryMerged() {
   const m = Object.assign({}, PRIMARY);
@@ -1067,7 +1319,7 @@ function setPrimary(name, v) {
 }
 function teacherBody() { document.body.classList.toggle('teacher', !!TP.on); }
 function exportPrimary() {
-  const blob = new Blob([JSON.stringify({ v: 1, primary: primaryMerged() }, null, 1)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ v: 1, primary: primaryMerged(), hidden: hiddenMerged() }, null, 1)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'primary.json';
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
@@ -1077,13 +1329,14 @@ async function importPrimary(e) {
     const j = JSON.parse(await f.text());
     if (!j.primary || typeof j.primary !== 'object') throw 0;
     TP.local = Object.assign({}, j.primary); LS.set('fw.teacher.primary', TP.local);
+    TH.local = Object.assign({}, j.hidden || {}); LS.set('fw.teacher.hidden', TH.local);
     refreshAll(); closeModal(); toast('Primary voicings imported');
   } catch (err) { toast('That is not a primary.json file'); }
 }
 function initTeacher() {
   teacherBody();
   fetch('primary.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null)
-    .then(j => { if (j && j.primary) { PRIMARY = j.primary; refreshAll(); } }).catch(() => {});
+    .then(j => { if (j && j.primary) { PRIMARY = j.primary; HIDDEN = j.hidden || {}; refreshAll(); } }).catch(() => {});
 }
 
 /* ================= first-time tour: how to read a chord diagram ================= */
@@ -1234,6 +1487,9 @@ function askLevel(done) {
   });
 }
 function init() {
+  applyFinish(); applyLook(); stkRender();
+  fetch('look.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(j => { if (j && j.look) { LOOK_SHIPPED = j.look; LS.set('fw.look.shipped', j.look); applyLook(); } }).catch(() => {});
+  if (/[?&]lab\b/.test(location.search)) setTimeout(labOpen, 400);
   buildKeys(); renderSongList(); renderMine(); updateWho();
   $('#chordIn').value = S.text; updateChord();
 
@@ -1264,6 +1520,8 @@ function init() {
       toast(primaryKey(S.text) ? S.text + ': this shape is now the primary voicing' : 'Primary cleared for ' + S.text);
       refreshAll(); return;
     }
+    if (e.target.closest('#btnHide')) { const on = toggleHidden(S.text, S.list[S.sel]); toast(on ? 'Hidden from students (export primary.json to publish)' : 'Shown again'); renderChord(); return; }
+    if (e.target.closest('#btnResetChord')) { resetChordTeacher(S.text); toast('Primary and hidden shapes cleared for ' + S.text); refreshAll(); return; }
     if (e.target.closest('#btnLearn')) { toggleLearned(canon(S.text)); renderChord(); return; }
     if (e.target.closest('#btnTheory')) { thOpen(S.text); return; }
     if (e.target.closest('#btnPlay') || e.target.closest('#detailDia')) { strum(S.list[S.sel]); return; }
@@ -1283,6 +1541,17 @@ function init() {
     const o = e.target.closest('[data-st]'); if (o) { setChordText(cl(o.dataset.st)); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
     if (e.target.closest('#stSongs')) { showView('songs'); $('#playable').scrollIntoView({ behavior: 'smooth' }); }
   });
+  $('#progs').addEventListener('click', e => {
+    if (e.target.closest('#pgNew')) { pgEdit(); return; }
+    const pl = e.target.closest('[data-pgplay]'), ed = e.target.closest('[data-pgedit]');
+    if (pl) { const p = D.progs.find(x => x.id === pl.dataset.pgplay); if (p) pgPlayer(p.name, p.chords); }
+    if (ed) pgEdit(ed.dataset.pgedit);
+  });
+  $('#btnPlaySong').onclick = () => {
+    if (!S.song) return; const ch = songChordsUI(S.song, S.tr, cfg().flats).map(canon).filter(pgChordOk);
+    if (!ch.length) { toast('No playable chords in this song'); return; }
+    pgPlayer(S.song.title || 'Song chords', ch);
+  };
   $('#btnImport').onclick = () => importModal();
   $('#songList').onclick = $('#sampleList').onclick = e => { const b = e.target.closest('[data-song]'); if (b) openSong(b.dataset.song); };
   $('#btnBack').onclick = () => { showView('songs'); renderSongList(); };
@@ -1296,8 +1565,8 @@ function init() {
   $('#sheet').addEventListener('click', e => { const c = e.target.closest('[data-c]'); if (c) openPicker(c.dataset.c); });
   $('#sheet').addEventListener('keydown', e => { if (e.key === 'Enter') { const c = e.target.closest('[data-c]'); if (c) openPicker(c.dataset.c); } });
   $('#btnSettings').onclick = settingsModal;
-  $('#lgTxt').textContent = SK ? 'EN' : 'SK'; $('#lgCap').textContent = SK ? 'English' : 'Slovenčina';
-  $('#btnLang').onclick = () => setLang(SK ? 'en' : 'sk');
+  $('#btnLang').dataset.lang = SK ? 'sk' : 'en'; $('#btnLang').setAttribute('aria-checked', SK);
+  $('#btnLang').onclick = () => { $('#btnLang').dataset.lang = SK ? 'en' : 'sk'; setTimeout(() => setLang(SK ? 'en' : 'sk'), 300); };   // let the lever flip first
   $('#btnProfile').onclick = profileModal;
 
   $('#btnHelp').onclick = tourOpen;
