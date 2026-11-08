@@ -531,7 +531,7 @@ function renderProgs() {
   const L = D.progs || [];
   el.innerHTML = `<div class="rowbar"><h3 class="sect" style="margin:0">Progressions</h3><button class="btn sm" id="pgNew">＋ New progression</button></div>`
     + (L.length ? L.map(p => `<div class="scard prow"><b>${esc(p.name || 'Untitled')}</b>
-        <div class="mini">${p.chords.map(c => `<span class="pill">${esc(sharpen(cl(c)))}</span>`).join('')}</div>
+        <div class="mini">${p.chords.map(c => `<span class="pill">${c ? esc(sharpen(cl(c))) : '–'}</span>`).join('')}</div>
         <div class="row"><button class="btn sm primary" data-pgplay="${esc(p.id)}">▶ Play</button><button class="btn sm ghost" data-pgedit="${esc(p.id)}">Edit</button></div></div>`).join('')
       : '<p class="note" style="margin:6px 0 10px">Save a sequence of chords, such as Em C G D, and let the app play it for you to practise along.</p>');
 }
@@ -587,7 +587,7 @@ function pgPlayer(title, chords) {
   const seg = (id, opts, cur) => `<nav class="seg" id="${id}">${opts.map(([v, l]) => `<button class="seg-b ${cur === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</nav>`;
   openModal(`<h2>${esc(title)}</h2>
     <div id="plDia" style="text-align:center;min-height:200px"></div>
-    <div class="notepills" id="plSeq" style="justify-content:center">${chords.map((c, i) => `<span class="pill" data-i="${i}">${esc(sharpen(cl(c)))}</span>`).join('')}</div>
+    <div class="notepills" id="plSeq" style="justify-content:center">${chords.map((c, i) => `<span class="pill" data-i="${i}">${c ? esc(sharpen(cl(c))) : '–'}</span>`).join('')}</div>
     <div class="row" style="justify-content:center;margin:12px 0"><button class="btn primary" id="plGo">▶ Play</button></div>
     <div class="field"><span>Speed</span>${seg('plSpd', [[1, 'Slow'], [2, 'Medium'], [3, 'Fast']], c0.pgSpeed)}</div>
     <div class="field"><span>Beats per chord</span>${seg('plBts', [[1, '1'], [2, '2'], [4, '4']], c0.pgBeats)}</div>
@@ -595,14 +595,14 @@ function pgPlayer(title, chords) {
     <label class="switch"><span>Click on each beat</span><input type="checkbox" id="plClk" ${c0.pgClick ? 'checked' : ''}><i></i></label></div>
     <div class="row"><span class="grow"></span><button class="btn" data-close>Close</button></div>`, b => {
     const show = i => {
-      const v = preferred(cl(chords[i]));
-      $('#plDia', b).innerHTML = v ? diagram(v, { names: true }) : '';
+      const v = chords[i] ? preferred(cl(chords[i])) : null;
+      $('#plDia', b).innerHTML = v ? diagram(v, { names: true }) : (chords[i] ? '' : '<p class="note" style="padding-top:80px">rest</p>');
       $$('#plSeq .pill', b).forEach((p, k) => p.classList.toggle('root', k === i));
     };
     const stop = () => { running = false; clearTimeout(timer); $('#plGo', b).textContent = '▶ Play'; };
     const step = () => {
       if (!running || !alive()) { running = false; return; }
-      if (bt === 0) { show(ci); strum(preferred(cl(chords[ci]))); }
+      if (bt === 0) { show(ci); if (chords[ci]) strum(preferred(cl(chords[ci]))); }
       if (c0.pgClick) pgClick(bt === 0);
       const ms = [0, 900, 650, 450][c0.pgSpeed];
       bt++;
@@ -632,7 +632,13 @@ function renderPins() {
   el.innerHTML = P.map(k => { const nm = cl(k), v = preferred(nm); return `<div class="pin"><button class="pinplay" data-pinplay="${esc(k)}" aria-label="${esc(nm)}"><b>${esc(sharpen(nm))}</b>${v ? diagram(v) : ''}</button><button class="pinx" data-unpin="${esc(k)}" aria-label="Unpin">✕</button><button class="pinadd" data-pinadd="${esc(k)}" aria-label="Add to sequence">＋</button></div>`; }).join('');
 }
 const SQ = { tok: 0, running: false, sel: -1, min: false };
-function seqBars() { return cfg().seq = cfg().seq || ['', '', '', '']; }
+function seqBars() { return SQ.prog ? SQ.prog.bars : (cfg().seq = cfg().seq || ['', '', '', '']); }
+function seqLoad(id) {   // open the sequence window on a saved progression (or a new one)
+  const p = id && (D.progs || []).find(x => x.id === id);
+  SQ.prog = { id: p ? p.id : null, name: p ? p.name : '', bars: p ? p.chords.slice() : (seqBars().some(Boolean) ? seqBars().slice() : ['', '', '', '']) };
+  if (SQ.prog.bars.length < 2) SQ.prog.bars.push('');
+  SQ.sel = SQ.prog.bars.findIndex(x => !x); seqStop(); seqOpen();
+}
 function seqAdd(k) {
   if (!pgChordOk(k)) { toast('I can’t find a playable shape for “' + cl(k) + '”'); return; }
   const B = seqBars(); let i = SQ.sel;
@@ -642,7 +648,7 @@ function seqAdd(k) {
   save(); seqOpen(); strum(preferred(cl(k)));
 }
 function seqOpen() { SQ.open = true; SQ.min = false; renderSeq(); }
-function seqClose() { seqStop(); SQ.open = false; $('#seqwin').hidden = true; }
+function seqClose() { seqStop(); SQ.prog = null; SQ.open = false; $('#seqwin').hidden = true; }
 function seqStop() { SQ.tok++; SQ.running = false; const b = $('#sqPlay'); if (b) b.textContent = '▶ Play'; document.querySelectorAll('#seqwin .sqbar.now').forEach(x => x.classList.remove('now')); }
 function seqPlay() {
   if (SQ.running) { seqStop(); return; }
@@ -666,10 +672,12 @@ function seqPlay() {
 }
 function renderSeq() {
   const el = $('#seqwin'); if (!el) return; if (!SQ.open) { el.hidden = true; return; }
+  if (SQ.prog && $('#sqName')) SQ.prog.name = $('#sqName').value;
   const B = seqBars(), c0 = cfg(); c0.pgSpeed = c0.pgSpeed || 2; c0.pgBeats = c0.pgBeats || 4;
   el.hidden = false; el.classList.toggle('min', SQ.min);
-  el.innerHTML = `<div class="sqhead"><b>Sequence</b><button class="btn sm" id="sqMin" aria-label="Minimise">${SQ.min ? '▴' : '▾'}</button><button class="btn sm primary" id="sqX" aria-label="Close">✕</button></div>
+  el.innerHTML = `<div class="sqhead"><b>${SQ.prog ? (SQ.prog.id ? 'Edit progression' : 'New progression') : 'Sequence'}</b><button class="btn sm" id="sqMin" aria-label="Minimise">${SQ.min ? '▴' : '▾'}</button><button class="btn sm primary" id="sqX" aria-label="Close">✕</button></div>
   <div class="sqbody">
+    ${SQ.prog ? `<label class="field"><span>Name</span><input id="sqName" value="${esc(SQ.prog.name)}" placeholder="e.g. My first four" maxlength="50"></label>` : ''}
     <div class="sqbars">${B.map((k, i) => `<div class="sqbar ${i === SQ.sel ? 'sel' : ''} ${k ? '' : 'empty'}" data-b="${i}"><span class="n">${i + 1}</span>${k ? (() => { const nm = cl(k), v = preferred(nm); return `<b>${esc(sharpen(nm))}</b>${v ? diagram(v) : ''}`; })() : '<i>empty</i>'}<button class="bx" data-bx="${i}" aria-label="${k ? 'Empty this bar' : 'Remove this bar'}">✕</button></div>`).join('')}
       <button class="sqaddbar" id="sqAddBar" aria-label="Add an empty bar">＋<small>bar</small></button></div>
     <div class="inputrow"><div class="engraved"><input id="sqIn" placeholder="Type a chord, e.g. Em" autocomplete="off" autocapitalize="off" spellcheck="false"></div><button class="btn" id="sqAdd">Add</button></div>
@@ -677,7 +685,7 @@ function renderSeq() {
       <button class="btn primary" id="sqPlay">${SQ.running ? '■ Stop' : '▶ Play'}</button>
       <button class="btn sm" id="sqSpd">${['', 'Slow', 'Medium', 'Fast'][c0.pgSpeed]}</button>
       <button class="btn sm" id="sqBts">${c0.pgBeats} beats a bar</button>
-      <button class="btn sm ghost" id="sqSave">Save as progression</button>
+      ${SQ.prog ? `<button class="btn sm primary" id="sqSave">${SQ.prog.id ? 'Save changes' : 'Save progression'}</button>${SQ.prog.id ? '<button class="btn sm danger" id="sqDel">Delete</button>' : ''}` : '<button class="btn sm ghost" id="sqSave">Save as progression</button>'}
       <button class="btn sm ghost" id="sqClear">Clear all</button>
     </div>
     <p class="note" style="margin:6px 0 0">Tap a bar to pick it, then use “＋ Add to sequence” on any chord. An empty bar is a rest.</p>
@@ -689,15 +697,26 @@ function seqInit() {
     const B = seqBars(); const t = id => e.target.closest(id);
     if (t('#sqX')) { seqClose(); return; }
     if (t('#sqMin')) { SQ.min = !SQ.min; renderSeq(); return; }
+    if (SQ.prog && $('#sqName')) SQ.prog.name = $('#sqName').value;
     const bx = t('[data-bx]'); if (bx) { const i = +bx.dataset.bx; if (B[i]) B[i] = ''; else if (B.length > 1) { B.splice(i, 1); if (SQ.sel >= B.length) SQ.sel = -1; } save(); renderSeq(); return; }
     const b = t('[data-b]'); if (b) { const i = +b.dataset.b; SQ.sel = i; if (B[i]) strum(preferred(cl(B[i]))); renderSeq(); return; }
-    if (t('#sqAddBar')) { B.push(''); SQ.sel = B.length - 1; save(); renderSeq(); return; }
+    if (t('#sqAddBar')) { B.push(''); if (SQ.prog) SQ.prog.name = ($('#sqName') || {}).value || SQ.prog.name; SQ.sel = B.length - 1; save(); renderSeq(); return; }
     if (t('#sqAdd')) { const v = $('#sqIn').value.trim(); if (v) { seqAdd(canon(v)); } return; }
     if (t('#sqPlay')) { seqPlay(); return; }
     if (t('#sqSpd')) { const c = cfg(); c.pgSpeed = c.pgSpeed % 3 + 1; save(); renderSeq(); return; }
     if (t('#sqBts')) { const c = cfg(); c.pgBeats = c.pgBeats === 1 ? 2 : c.pgBeats === 2 ? 4 : 1; save(); renderSeq(); return; }
-    if (t('#sqSave')) { const ch = B.filter(Boolean); if (!ch.length) { toast('Add a chord first'); return; } pgEdit(null, { chords: ch, name: '' }); return; }
-    if (t('#sqClear')) { cfg().seq = ['', '', '', '']; SQ.sel = -1; seqStop(); save(); renderSeq(); }
+    if (t('#sqSave')) {
+      if (!SQ.prog) { if (!B.some(Boolean)) { toast('Add a chord first'); return; } seqLoad(null); return; }
+      if (!B.some(Boolean)) { toast('Add at least one chord'); return; }
+      const ch = B.slice(); while (ch.length && !ch[ch.length - 1]) ch.pop();
+      const nm = ($('#sqName').value || '').trim() || ch.filter(Boolean).slice(0, 4).map(c => cl(c)).join(' ');
+      D.progs = D.progs || [];
+      if (SQ.prog.id) { const ex = D.progs.find(x => x.id === SQ.prog.id); if (ex) { ex.name = nm; ex.chords = ch; } }
+      else { SQ.prog.id = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4); D.progs.unshift({ id: SQ.prog.id, name: nm, chords: ch }); }
+      SQ.prog.name = nm; save(); renderProgs(); renderSeq(); toast('Progression saved'); return;
+    }
+    if (t('#sqDel')) { if (!confirm('Delete this progression?')) return; D.progs = D.progs.filter(x => x.id !== SQ.prog.id); save(); renderProgs(); seqClose(); return; }
+    if (t('#sqClear')) { B.length = 0; B.push('', '', '', ''); SQ.sel = -1; seqStop(); save(); renderSeq(); }
   });
   el.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'sqIn') { const v = e.target.value.trim(); if (v) seqAdd(canon(v)); } });
   $('#pinbar').addEventListener('click', e => {
@@ -1744,10 +1763,10 @@ function init() {
     if (e.target.closest('#stSongs')) { showView('songs'); $('#playable').scrollIntoView({ behavior: 'smooth' }); }
   });
   $('#progs').addEventListener('click', e => {
-    if (e.target.closest('#pgNew')) { pgEdit(); return; }
+    if (e.target.closest('#pgNew')) { seqLoad(null); return; }
     const pl = e.target.closest('[data-pgplay]'), ed = e.target.closest('[data-pgedit]');
     if (pl) { const p = D.progs.find(x => x.id === pl.dataset.pgplay); if (p) pgPlayer(p.name, p.chords); }
-    if (ed) pgEdit(ed.dataset.pgedit);
+    if (ed) seqLoad(ed.dataset.pgedit);
   });
   $('#btnLearnSong').onclick = () => { if (S.song) learnChords('Chords in this song', songChordsUI(S.song, S.tr, cfg().flats)); };
   $('#btnPlaySong').onclick = () => {

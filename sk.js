@@ -48,6 +48,7 @@ const D = {
   '📌 Pin to top': '📌 Pripnúť hore', '📌 Pinned (tap to unpin)': '📌 Pripnuté (ťukni na odopnutie)', '＋ Add to sequence': '＋ Pridať do sekvencie', 'Sequence': 'Sekvencia',
   'Type a chord, e.g. Em': 'Napíš akord, napr. Em', 'Save as progression': 'Uložiť ako postup', 'Clear all': 'Vymazať všetko', 'Slow': 'Pomaly', 'Medium': 'Stredne', 'Fast': 'Rýchlo', 'empty': 'prázdne',
   'Tap a bar to pick it, then use “＋ Add to sequence” on any chord. An empty bar is a rest.': 'Ťukni na takt, potom použi „＋ Pridať do sekvencie“ pri akomkoľvek akorde. Prázdny takt je pauza.', 'Add a chord to a bar first': 'Najprv pridaj akord do taktu',
+  'Edit progression': 'Upraviť postup', 'New progression': 'Nový postup', 'Save changes': 'Uložiť zmeny', 'Save progression': 'Uložiť postup', 'rest': 'pauza',
   'Mark as learned': 'Označiť ako naučené',
   '✓ I can play this': '✓ Toto už viem zahrať',
   '♪ Play a song with these chords': '♪ Zahraj pieseň s týmito akordmi',
