@@ -18,6 +18,8 @@ const D = {
   'Am7, F#m7b5, Cmaj9/E …': 'Ami7, Fismi7b5, Cmaj9/H …',
   'major': 'dur', 'minor': 'mol',
   'Fewer ▴': 'Menej ▴',
+  'Add to home screen': 'Pridať na plochu', 'Got it': 'Rozumiem', 'Install': 'Inštalovať', 'How?': 'Ako?',
+  'Fretwork then gets its own icon and opens full screen, without the browser bars.': 'Fretwork potom dostane vlastnú ikonu a otvorí sa na celú obrazovku, bez líšt prehliadača.',
   'Stickers': 'Nálepky', 'Stickers sit behind everything. Drag a visible one to move it, or use Across and Down. Tap a number to pick a sticker.': 'Nálepky sú vždy za všetkým. Viditeľnú môžeš potiahnuť, alebo použi Vodorovne a Zvisle. Ťukni na číslo a vyber nálepku.', 'Across': 'Vodorovne', 'Down': 'Zvisle',
   'Shape': 'Tvar', 'Circle': 'Kruh', 'Burst': 'Výbuch', 'Star': 'Hviezda', 'Label': 'Štítok', 'Anarchy': 'Anarchia', 'Fill colour': 'Farba výplne', 'Text colour': 'Farba textu', 'Size': 'Veľkosť', 'Turn': 'Natočenie', 'Text': 'Text', 'Reset to default': 'Vrátiť pôvodné',
   'Tweak the look (style lab)': 'Upraviť vzhľad (štúdio)', 'Style lab': 'Štúdio vzhľadu', 'Done': 'Hotovo',
@@ -38,6 +40,14 @@ const D = {
   'Main chord progressions of well-known songs, simplest first. Chords like E5 or G5 are power chords: two or three strings, one shape you slide up and down the neck. “Find chords” opens a web search in a new tab, where you can look for the full chart.': 'Hlavné akordové postupy známych piesní, od najjednoduchších. Akordy ako E5 alebo G5 sú power akordy: dve alebo tri struny, jeden hmat, ktorý posúvaš po hmatníku. „Nájsť akordy“ otvorí vyhľadávanie na webe v novej karte, kde nájdeš celý zápis.',
   'Help': 'Pomoc',
   'Your first 4 chords': 'Tvoje prvé 4 akordy',
+  'Show the keyboard ▾': 'Ukázať klaviatúru ▾', 'Hide the keyboard ▴': 'Skryť klaviatúru ▴', '▶ Hear it': '▶ Počuť', '▶ Play it': '▶ Prehrať', '■ Stop': '■ Stop',
+  'Hear what you will be able to play': 'Počúvaj, čo budeš vedieť zahrať', 'Three chords are all it takes for a song everyone knows.': 'Tri akordy stačia na pieseň, ktorú pozná každý.',
+  'Tap or swipe across the strings to hear them': 'Ťukni alebo prejdi prstom po strunách', 'Tap a shape to hear it': 'Ťukni na tvar a započuješ ho', '▶ Strum all': '▶ Zahraj všetky',
+  'Learn chords': 'Nauč sa akordy', 'Chords in this song': 'Akordy v tejto piesni', 'One shape for each chord. Tap a diagram to hear it.': 'Jeden tvar pre každý akord. Ťukni na diagram a započuješ ho.', 'Open in Chords': 'Otvoriť v Akordoch', 'Other shapes': 'Iné tvary',
+  'Type any chord here to see it and learn it': 'Sem napíš akýkoľvek akord, uvidíš ho a naučíš sa ho',
+  '📌 Pin to top': '📌 Pripnúť hore', '📌 Pinned (tap to unpin)': '📌 Pripnuté (ťukni na odopnutie)', '＋ Add to sequence': '＋ Pridať do sekvencie', 'Sequence': 'Sekvencia',
+  'Type a chord, e.g. Em': 'Napíš akord, napr. Em', 'Save as progression': 'Uložiť ako postup', 'Clear all': 'Vymazať všetko', 'Slow': 'Pomaly', 'Medium': 'Stredne', 'Fast': 'Rýchlo', 'empty': 'prázdne',
+  'Tap a bar to pick it, then use “＋ Add to sequence” on any chord. An empty bar is a rest.': 'Ťukni na takt, potom použi „＋ Pridať do sekvencie“ pri akomkoľvek akorde. Prázdny takt je pauza.', 'Add a chord to a bar first': 'Najprv pridaj akord do taktu',
   'Mark as learned': 'Označiť ako naučené',
   '✓ I can play this': '✓ Toto už viem zahrať',
   '♪ Play a song with these chords': '♪ Zahraj pieseň s týmito akordmi',
@@ -276,6 +286,7 @@ const D = {
 
 /* patterns for dynamic text: [regex, replacement string or function] (the regex is run on the trimmed text) */
 const P = [
+  [/^Add Fretwork to your home screen and open it like an app\.\s*(Install|How\?)?$/, 'Pridaj Fretwork na plochu a otváraj ho ako aplikáciu.'],
   [/^(\d) of 4 learned$/, '$1 zo 4 naučené'],
   [/^Not a common chord yet\. Try moving a finger, or$/, 'Zatiaľ nie je bežný akord. Skús pohnúť prstom, alebo'],
   [/^More shapes \((\d+)\)$/, 'Ďalšie hmaty ($1)'],

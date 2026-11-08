@@ -8,10 +8,11 @@
 <meta name="mobile-web-app-capable" content="yes">
 <title>Fretwork – Guitar Chord Workshop</title>
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="favicon.ico" sizes="48x48">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="style.css?v=10">
-<link rel="stylesheet" href="theme.css?v=10">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="style.css?v=20">
+<link rel="stylesheet" href="theme.css?v=20">
 <script>/* apply saved look and wood colour before first paint, so a reload never flashes the defaults */
 (function(){try{var g=function(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},r=document.documentElement.style,
 u={'--ow':'px','--so':'px','--rad':'px','--tilt':'deg'},
@@ -63,53 +64,36 @@ if(f){r.setProperty('--hue',f.hue+'deg');r.setProperty('--wsat',f.sat);r.setProp
 </svg>
 
 <div id="app">
-  <header class="deck">
-    <div class="brand" aria-label="Fretwork">
-      <svg viewBox="0 0 40 40" class="logo" aria-hidden="true"><path d="M20 3C10 3 5 10 6 18c1 9 9 19 14 19s13-10 14-19C35 10 30 3 20 3z" fill="#efe2bd" stroke="#1b0f08" stroke-width="2.5"/><text x="20" y="26" text-anchor="middle" font-size="17" font-weight="900" fill="#c0391e" font-family="Marker Felt,Chalkboard SE,Comic Sans MS,cursive">F</text></svg>
-      <span>Fret<em>work</em></span>
-    </div>
-    <nav class="seg" id="nav" role="tablist">
-      <button class="seg-b on" data-view="chords" role="tab">Chords</button>
-      <button class="seg-b" data-view="find" role="tab" title="Place your fingers and find the chord">Find</button>
-      <button class="seg-b" data-view="theory" role="tab" title="How chords are built">Theory</button>
-      <button class="seg-b" data-view="songs" role="tab">Songs</button>
-    </nav>
-    <div class="tools">
-      <button class="knob pickup" id="btnLang" data-lang="en" role="switch" aria-checked="false" title="Language / Jazyk" aria-label="Language"><span class="pk-slot"></span><span class="pk-lever"><span class="pk-tip"></span></span><span class="pk-l">EN</span><span class="pk-r">SK</span><span id="lgTxt"></span><span id="lgCap"></span></button>
-      <button class="knob" id="btnHelp" title="How to read a chord diagram" aria-label="How to read a chord diagram" style="font-weight:700;font-size:1.25rem;color:#e7d3a0"><span>?</span></button>
-      <button class="chip-btn" id="btnProfile" title="Profile"><span class="avatar" id="avatar">G</span><span class="who" id="whoName">Guest</span></button>
-      <button class="knob" id="btnSettings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3h-4l-.4 3a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.7 1.7 1l.4 3h4l.4-3c.6-.3 1.2-.6 1.7-1l2.4 1 2-3.4zM13 15.5A3.5 3.5 0 1 1 13 8.5a3.5 3.5 0 0 1 0 7z"/></svg></button>
-    </div>
-  </header>
   <div id="tuneBar" class="tunebar" role="status" hidden></div>
-  <div id="wip" class="wip"></div>
 
   <main>
     <!-- CHORDS -->
     <section id="v-chords" class="view on">
-      <div class="panel leather">
-        <label class="plate-label" for="chordIn">Chord</label>
-        <div class="inputrow">
-          <div class="engraved"><input id="chordIn" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Am7, F#m7b5, Cmaj9/E …" aria-label="Chord name"></div>
-          <button class="btn" id="btnClear" aria-label="Clear">✕</button>
-        </div>
-        <div class="keys" id="rootKeys" aria-label="Root note"></div>
-        <div class="chipbox" id="suffixChips" aria-label="Chord quality"></div>
-        <div class="status" id="chordInfo"></div>
-        <button class="btn ghost sm" id="btnHelp2">▶ New here? How to read a chord diagram</button>
-      </div>
-
       <div id="startCard" class="startcard" hidden></div>
 
       <div id="chordResult" hidden>
         <div class="detail card paper" id="detail"></div>
         <h3 class="sect">Other voicings <small id="voicingCount"></small></h3>
+        <p class="taphint2">Tap a shape to hear it</p>
         <div class="grid" id="voicings"></div>
       </div>
       <div class="hint" id="chordHint"></div>
 
       <h3 class="sect" id="mineHead" hidden>My voicings</h3>
       <div class="grid small" id="mine"></div>
+
+      <div class="panel leather" id="chordPanel">
+        <label class="plate-label" for="chordIn">Type any chord here to see it and learn it</label>
+        <div class="inputrow">
+          <div class="engraved"><input id="chordIn" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Am7, F#m7b5, Cmaj9/E …" aria-label="Chord name"></div>
+          <button class="btn" id="btnClear" aria-label="Clear">✕</button>
+        </div>
+        <button class="btn ghost sm" id="btnKeys" type="button">Show the keyboard ▾</button>
+        <div class="keys" id="rootKeys" aria-label="Root note"></div>
+        <div class="chipbox" id="suffixChips" aria-label="Chord quality"></div>
+        <div class="status" id="chordInfo"></div>
+        <button class="btn ghost sm" id="btnHelp2">▶ New here? How to read a chord diagram</button>
+      </div>
     </section>
 
     <!-- FIND CHORD -->
@@ -168,6 +152,7 @@ if(f){r.setProperty('--hue',f.hue+'deg');r.setProperty('--wsat',f.sat);r.setProp
       <div class="rowbar wrapbar">
         <button class="btn" id="btnBack">‹ Songs</button>
         <div class="songhead"><h2 id="songTitle"></h2><div id="songArtist" class="sub"></div></div>
+        <button class="btn" id="btnLearnSong">Learn chords</button>
         <button class="btn" id="btnPlaySong">▶ Play chords</button>
         <button class="btn" id="btnEditSong">Edit</button>
       </div>
@@ -185,6 +170,29 @@ if(f){r.setProperty('--hue',f.hue+'deg');r.setProperty('--wsat',f.sat);r.setProp
       <article class="sheet paper" id="sheet"></article>
     </section>
   </main>
+
+  <div id="wip" class="wip"></div>
+  <div id="a2hs" class="wip a2hs" hidden></div>
+
+  <header class="deck">
+    <div class="brand" aria-label="Fretwork">
+      <svg viewBox="0 0 40 40" class="logo" aria-hidden="true"><path d="M20 3C10 3 5 10 6 18c1 9 9 19 14 19s13-10 14-19C35 10 30 3 20 3z" fill="#efe2bd" stroke="#1b0f08" stroke-width="2.5"/><text x="20" y="26" text-anchor="middle" font-size="17" font-weight="900" fill="#c0391e" font-family="Marker Felt,Chalkboard SE,Comic Sans MS,cursive">F</text></svg>
+      <span>Fret<em>work</em></span>
+    </div>
+    <nav class="seg" id="nav" role="tablist">
+      <button class="seg-b on" data-view="chords" role="tab">Chords</button>
+      <button class="seg-b" data-view="find" role="tab" title="Place your fingers and find the chord">Find</button>
+      <button class="seg-b" data-view="theory" role="tab" title="How chords are built">Theory</button>
+      <button class="seg-b" data-view="songs" role="tab">Songs</button>
+    </nav>
+    <div class="tools">
+      <button class="knob pickup" id="btnLang" data-lang="en" role="switch" aria-checked="false" title="Language / Jazyk" aria-label="Language"><span class="pk-slot"></span><span class="pk-lever"><span class="pk-tip"></span></span><span class="pk-l">EN</span><span class="pk-r">SK</span><span id="lgTxt"></span><span id="lgCap"></span></button>
+      <button class="knob" id="btnSeq" title="Chord sequence" aria-label="Chord sequence" style="font-weight:700;font-size:1.25rem;color:#e7d3a0"><span>♫</span></button>
+      <button class="knob" id="btnHelp" title="How to read a chord diagram" aria-label="How to read a chord diagram" style="font-weight:700;font-size:1.25rem;color:#e7d3a0"><span>?</span></button>
+      <button class="chip-btn" id="btnProfile" title="Profile"><span class="avatar" id="avatar">G</span><span class="who" id="whoName">Guest</span></button>
+      <button class="knob" id="btnSettings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3h-4l-.4 3a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.7 1.7 1l.4 3h4l.4-3c.6-.3 1.2-.6 1.7-1l2.4 1 2-3.4zM13 15.5A3.5 3.5 0 1 1 13 8.5a3.5 3.5 0 0 1 0 7z"/></svg></button>
+    </div>
+  </header>
 
   <div class="foot">Fretwork · tap any diagram to hear it</div>
 </div>
@@ -206,11 +214,13 @@ if(f){r.setProperty('--hue',f.hue+'deg');r.setProperty('--wsat',f.sat);r.setProp
 
 <div id="tour" class="tour" hidden></div>
 
+<div id="pinbar" class="pinbar" hidden></div>
+<div id="seqwin" class="seqwin" hidden></div>
 <div id="toast" class="toast" hidden></div>
 
-<script src="config.js?v=10"></script>
-<script src="engine.js?v=10"></script>
-<script src="sk.js?v=10"></script>
-<script src="app.js?v=10"></script>
+<script src="config.js?v=20"></script>
+<script src="engine.js?v=20"></script>
+<script src="sk.js?v=20"></script>
+<script src="app.js?v=20"></script>
 </body>
 </html>

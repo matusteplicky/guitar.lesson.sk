@@ -167,16 +167,21 @@ function pluckBuffer(c, midi) {
   Audio_.cache.set(midi, buf);
   return buf;
 }
-function strum(v) {
+function strum(v, only) {   // only = one string index (tap a string); otherwise the whole chord
   if (!cfg().sound || !v) return;
   const c = actx(); if (!c) return;
   const tun = F.TUNINGS[cfg().tuning];
   let k = 0; const t0 = c.currentTime + 0.02;
+  if (only == null) {   // a new chord damps the previous one so the tails do not smear together
+    (strum.live || []).forEach(g => { try { g.gain.cancelScheduledValues(t0 - 0.02); g.gain.setValueAtTime(g.gain.value, t0 - 0.02); g.gain.linearRampToValueAtTime(0, t0 + 0.06); } catch (e) {} });
+    strum.live = [];
+  }
   v.frets.forEach((f, s) => {
-    if (f < 0) return;
+    if (f < 0 || (only != null && s !== only)) return;
     const src = c.createBufferSource(); src.buffer = pluckBuffer(c, tun[s] + f);
     const g = c.createGain(); g.gain.value = 0.2;
     src.connect(g).connect(c.destination); src.start(t0 + k++ * 0.05);
+    (strum.live = strum.live || []).push(g);
   });
 }
 
@@ -364,17 +369,39 @@ function tagsFor(v, name) {
 const FIRST4 = ['Em', 'Am', 'D', 'G'];
 const learned = k => !!(cfg().learned || {})[k];   // k = canonical English chord name
 function toggleLearned(k) { const L = cfg().learned = cfg().learned || {}; if (L[k]) delete L[k]; else L[k] = 1; save(); renderStart(); renderPlayable(); }
+const HERO = ['G', 'D', 'Am'];
+let heroTok = 0;
+function heroStop() { heroTok++; document.querySelectorAll('#heroRow .hchip.on').forEach(x => x.classList.remove('on')); const b = $('#heroGo'); if (b) b.textContent = '▶ Play it'; }
+function heroPlay() {
+  const b = $('#heroGo'); if (b && b.textContent.startsWith('■')) { heroStop(); return; }
+  const tok = ++heroTok, seq = [0, 1, 2, 2, 0, 1, 2, 2]; let i = 0;
+  if (b) b.textContent = '■ Stop';
+  const step = () => {
+    if (tok !== heroTok) return;
+    document.querySelectorAll('#heroRow .hchip').forEach((x, j) => x.classList.toggle('on', j === seq[i]));
+    strum(preferred(cl(HERO[seq[i]])));
+    if (++i >= seq.length) { setTimeout(() => { if (tok === heroTok) heroStop(); }, 1100); return; }
+    setTimeout(step, 1100);
+  };
+  step();
+}
 function renderStart() {
   const el = $('#startCard'); if (!el) return;
   if (!isBeg()) { el.hidden = true; el.innerHTML = ''; return; }
   el.hidden = false;
   const n = FIRST4.filter(learned).length;
-  el.innerHTML = `<h3 class="sect">Your first 4 chords <small>${n} of 4 learned</small></h3>
-    <div class="grid">${FIRST4.map(c => { const nm = cl(c), v = preferred(nm); return `<div class="vcard stile ${learned(c) ? 'done' : ''}"><button class="stopen" data-st="${c}" aria-label="${esc(nm)}"><div class="name">${esc(sharpen(nm))}</div>${v ? diagram(v) : ''}</button><button class="btn sm ${learned(c) ? 'primary' : ''}" data-learn="${c}">${learned(c) ? '✓ I can play this' : 'Mark as learned'}</button></div>`; }).join('')}</div>
+  const hv = HERO.map(c => preferred(cl(c)));
+  el.innerHTML = `<div class="hero"><div class="herotxt"><b>Hear what you will be able to play</b><span>Three chords are all it takes for a song everyone knows.</span></div>
+    <div class="herorow" id="heroRow">${HERO.map((c, i) => `<div class="hchip" data-h="${i}"><div class="name">${esc(sharpen(cl(c)))}</div>${hv[i] ? diagram(hv[i]) : ''}</div>`).join('')}</div>
+    <button class="btn primary" id="heroGo">▶ Play it</button></div>
+    <h3 class="sect">Your first 4 chords <small>${n} of 4 learned</small></h3>
+    <div class="grid">${FIRST4.map(c => { const nm = cl(c), v = preferred(nm); return `<div class="vcard stile ${learned(c) ? 'done' : ''}"><button class="stopen" data-st="${c}" aria-label="${esc(nm)}"><div class="name">${esc(sharpen(nm))}</div>${v ? diagram(v) : ''}<span class="hear">▶ Hear it</span></button><button class="btn sm ${learned(c) ? 'primary' : ''}" data-learn="${c}">${learned(c) ? '✓ I can play this' : 'Mark as learned'}</button></div>`; }).join('')}</div>
     <div class="actions" style="margin:10px 0"><button class="btn" id="stSongs">♪ Songs you can play with these chords</button></div>`;
 }
 function applyBeg() {
   const t = document.querySelector('#nav [data-view="theory"]'); if (t) t.hidden = isBeg();
+  const p = $('#chordPanel');
+  if (p) { p.classList.toggle('begmode', isBeg()); p.classList.toggle('collapsed', isBeg() && !S.keysOpen); $('#btnKeys').textContent = S.keysOpen ? 'Hide the keyboard ▴' : 'Show the keyboard ▾'; }
   renderStart();
 }
 function renderChord() {
@@ -384,7 +411,7 @@ function renderChord() {
   const pills = chord.tones.map(t => `<span class="pill ${t.label === '1' ? 'root' : ''}">${esc(sharpen(nn(t.name)))}<i>${esc(sharpen(t.label))}</i></span>`).join('');
   const modes = [['finger', 'Fingers'], ['note', 'Notes'], ['interval', 'Intervals']];
   $('#detail').innerHTML = `
-    <div id="detailDia" data-play>${diagram(v, { names: true })}</div>
+    <div><div id="detailDia" data-play>${diagram(v, { names: true })}</div><p class="taphint">Tap or swipe across the strings to hear them</p></div>
     <div>
       <h2>${esc(sharpen(raw))}${usualHtml(chord)}</h2>
       <div class="notepills">${pills}</div>
@@ -396,7 +423,9 @@ function renderChord() {
       </div>
       <div class="opts" role="group" aria-label="Dot labels">${modes.map(([m, l]) => `<button class="chip ${cfg().label === m ? 'on' : ''}" data-mode="${m}">${l}</button>`).join('')}</div>
       <div class="actions">
-        <button class="btn primary" id="btnPlay">▶ Strum</button>
+        <button class="btn primary" id="btnPlay">▶ Strum all</button>
+        <button class="btn" id="btnPin">${pinned(canon(raw)) ? '📌 Pinned (tap to unpin)' : '📌 Pin to top'}</button>
+        <button class="btn" id="btnSeqAdd">＋ Add to sequence</button>
         <button class="btn" id="btnPref">${isPref ? '★ My voicing' : '☆ Use in my songs'}</button>
         ${isBeg() ? `<button class="btn" id="btnLearn">${learned(canon(raw)) ? '✓ I can play this' : 'Mark as learned'}</button>` : '<button class="btn ghost" id="btnTheory">Theory ›</button>'}
         ${TP.on ? `<button class="btn teach" id="btnPrimary">${isPrim ? '◆ Primary (tap to clear)' : '◆ Make primary'}</button>
@@ -490,7 +519,7 @@ function renderPlayable() {
       return `<div class="scard prow ${ok ? 'ok' : ''}"><b>${esc(r[0])}</b><span>${esc(r[1])} · ${esc(r[2])}${ok ? ' · you know these chords' : ''}</span>
         <div class="mini">${r[3].map(c => `<button class="pill" data-open="${esc(cl(c))}">${esc(sharpen(cl(c)))}</button>`).join('')}</div>
         <span class="progline">${esc(r[4])}</span>
-        <a class="btn sm ghost" href="https://duckduckgo.com/?q=${q}" target="_blank" rel="noopener noreferrer">Find chords ↗</a></div>`;
+        <button class="btn sm" data-learnrow="${esc(r[3].map(canon).join(','))}" data-t="${esc(r[0])}">Learn chords</button> <a class="btn sm ghost" href="https://duckduckgo.com/?q=${q}" target="_blank" rel="noopener noreferrer">Find chords ↗</a></div>`;
     }).join('')}`;
 }
 
@@ -588,6 +617,99 @@ function pgPlayer(title, chords) {
     $('#plClk', b).onchange = e => { c0.pgClick = e.target.checked; save(); };
   });
 }
+
+/* ================= pinned chords (top bar) and the sequence window ================= */
+const pinned = k => (cfg().pins || []).includes(k);
+function togglePin(k) {
+  const P = cfg().pins = cfg().pins || [];
+  const i = P.indexOf(k); if (i >= 0) P.splice(i, 1); else P.push(k);
+  save(); renderPins();
+}
+function renderPins() {
+  const el = $('#pinbar'); if (!el) return;
+  const P = cfg().pins || [];
+  el.hidden = !P.length; document.body.classList.toggle('has-pins', !!P.length);
+  el.innerHTML = P.map(k => { const nm = cl(k), v = preferred(nm); return `<div class="pin"><button class="pinplay" data-pinplay="${esc(k)}" aria-label="${esc(nm)}"><b>${esc(sharpen(nm))}</b>${v ? diagram(v) : ''}</button><button class="pinx" data-unpin="${esc(k)}" aria-label="Unpin">✕</button><button class="pinadd" data-pinadd="${esc(k)}" aria-label="Add to sequence">＋</button></div>`; }).join('');
+}
+const SQ = { tok: 0, running: false, sel: -1, min: false };
+function seqBars() { return cfg().seq = cfg().seq || ['', '', '', '']; }
+function seqAdd(k) {
+  if (!pgChordOk(k)) { toast('I can’t find a playable shape for “' + cl(k) + '”'); return; }
+  const B = seqBars(); let i = SQ.sel;
+  if (!(i >= 0 && i < B.length && !B[i])) i = B.findIndex(x => !x);
+  if (i < 0) { B.push(''); i = B.length - 1; }
+  B[i] = k; SQ.sel = B.findIndex((x, j) => j > i && !x);
+  save(); seqOpen(); strum(preferred(cl(k)));
+}
+function seqOpen() { SQ.open = true; SQ.min = false; renderSeq(); }
+function seqClose() { seqStop(); SQ.open = false; $('#seqwin').hidden = true; }
+function seqStop() { SQ.tok++; SQ.running = false; const b = $('#sqPlay'); if (b) b.textContent = '▶ Play'; document.querySelectorAll('#seqwin .sqbar.now').forEach(x => x.classList.remove('now')); }
+function seqPlay() {
+  if (SQ.running) { seqStop(); return; }
+  const c0 = cfg(); c0.pgSpeed = c0.pgSpeed || 2; c0.pgBeats = c0.pgBeats || 4; if (c0.pgClick == null) c0.pgClick = true;
+  const B = seqBars(); if (!B.some(Boolean)) { toast('Add a chord to a bar first'); return; }
+  const tok = ++SQ.tok; SQ.running = true; $('#sqPlay').textContent = '■ Stop';
+  let i = 0, bt = 0;
+  const step = () => {
+    if (tok !== SQ.tok) return;
+    const bars = seqBars();
+    if (bt === 0) {
+      document.querySelectorAll('#seqwin .sqbar').forEach((x, j) => x.classList.toggle('now', j === i));
+      if (bars[i]) strum(preferred(cl(bars[i])));
+    }
+    if (c0.pgClick) pgClick(bt === 0);
+    bt++;
+    if (bt >= c0.pgBeats) { bt = 0; i++; if (i >= bars.length) i = 0; }
+    setTimeout(step, [0, 900, 650, 450][c0.pgSpeed]);
+  };
+  step();
+}
+function renderSeq() {
+  const el = $('#seqwin'); if (!el) return; if (!SQ.open) { el.hidden = true; return; }
+  const B = seqBars(), c0 = cfg(); c0.pgSpeed = c0.pgSpeed || 2; c0.pgBeats = c0.pgBeats || 4;
+  el.hidden = false; el.classList.toggle('min', SQ.min);
+  el.innerHTML = `<div class="sqhead"><b>Sequence</b><button class="btn sm" id="sqMin" aria-label="Minimise">${SQ.min ? '▴' : '▾'}</button><button class="btn sm primary" id="sqX" aria-label="Close">✕</button></div>
+  <div class="sqbody">
+    <div class="sqbars">${B.map((k, i) => `<div class="sqbar ${i === SQ.sel ? 'sel' : ''} ${k ? '' : 'empty'}" data-b="${i}"><span class="n">${i + 1}</span>${k ? (() => { const nm = cl(k), v = preferred(nm); return `<b>${esc(sharpen(nm))}</b>${v ? diagram(v) : ''}`; })() : '<i>empty</i>'}<button class="bx" data-bx="${i}" aria-label="${k ? 'Empty this bar' : 'Remove this bar'}">✕</button></div>`).join('')}
+      <button class="sqaddbar" id="sqAddBar" aria-label="Add an empty bar">＋<small>bar</small></button></div>
+    <div class="inputrow"><div class="engraved"><input id="sqIn" placeholder="Type a chord, e.g. Em" autocomplete="off" autocapitalize="off" spellcheck="false"></div><button class="btn" id="sqAdd">Add</button></div>
+    <div class="actions">
+      <button class="btn primary" id="sqPlay">${SQ.running ? '■ Stop' : '▶ Play'}</button>
+      <button class="btn sm" id="sqSpd">${['', 'Slow', 'Medium', 'Fast'][c0.pgSpeed]}</button>
+      <button class="btn sm" id="sqBts">${c0.pgBeats} beats a bar</button>
+      <button class="btn sm ghost" id="sqSave">Save as progression</button>
+      <button class="btn sm ghost" id="sqClear">Clear all</button>
+    </div>
+    <p class="note" style="margin:6px 0 0">Tap a bar to pick it, then use “＋ Add to sequence” on any chord. An empty bar is a rest.</p>
+  </div>`;
+}
+function seqInit() {
+  const el = $('#seqwin');
+  el.addEventListener('click', e => {
+    const B = seqBars(); const t = id => e.target.closest(id);
+    if (t('#sqX')) { seqClose(); return; }
+    if (t('#sqMin')) { SQ.min = !SQ.min; renderSeq(); return; }
+    const bx = t('[data-bx]'); if (bx) { const i = +bx.dataset.bx; if (B[i]) B[i] = ''; else if (B.length > 1) { B.splice(i, 1); if (SQ.sel >= B.length) SQ.sel = -1; } save(); renderSeq(); return; }
+    const b = t('[data-b]'); if (b) { const i = +b.dataset.b; SQ.sel = i; if (B[i]) strum(preferred(cl(B[i]))); renderSeq(); return; }
+    if (t('#sqAddBar')) { B.push(''); SQ.sel = B.length - 1; save(); renderSeq(); return; }
+    if (t('#sqAdd')) { const v = $('#sqIn').value.trim(); if (v) { seqAdd(canon(v)); } return; }
+    if (t('#sqPlay')) { seqPlay(); return; }
+    if (t('#sqSpd')) { const c = cfg(); c.pgSpeed = c.pgSpeed % 3 + 1; save(); renderSeq(); return; }
+    if (t('#sqBts')) { const c = cfg(); c.pgBeats = c.pgBeats === 1 ? 2 : c.pgBeats === 2 ? 4 : 1; save(); renderSeq(); return; }
+    if (t('#sqSave')) { const ch = B.filter(Boolean); if (!ch.length) { toast('Add a chord first'); return; } pgEdit(null, { chords: ch, name: '' }); return; }
+    if (t('#sqClear')) { cfg().seq = ['', '', '', '']; SQ.sel = -1; seqStop(); save(); renderSeq(); }
+  });
+  el.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'sqIn') { const v = e.target.value.trim(); if (v) seqAdd(canon(v)); } });
+  $('#pinbar').addEventListener('click', e => {
+    const p = e.target.closest('[data-pinplay]'); if (p) { strum(preferred(cl(p.dataset.pinplay))); return; }
+    const u = e.target.closest('[data-unpin]'); if (u) { togglePin(u.dataset.unpin); if (S.chord) renderChord(); return; }
+    const a = e.target.closest('[data-pinadd]'); if (a) seqAdd(a.dataset.pinadd);
+  });
+  $('#btnSeq').onclick = () => { if (SQ.open) seqClose(); else seqOpen(); };
+  const place = () => { const d = document.querySelector('.deck'); if (d) document.documentElement.style.setProperty('--deckh', (d.offsetHeight + 18) + 'px'); };
+  place(); addEventListener('resize', place); setTimeout(place, 600);
+  renderPins();
+}
 function renderSongList() {
   renderPlayable(); renderProgs();
   $('#songList').innerHTML = D.songs.length ? D.songs.map(songCard).join('') : '<div class="empty">No songs yet. Import one: paste text from any chord site, or open a ChordPro / text file.</div>';
@@ -626,6 +748,19 @@ function renderStrip() {
   const on = $('#swCharts').checked; strip.hidden = !on; if (!on) return;
   const chords = songChordsUI(S.song, S.tr, cfg().flats);
   strip.innerHTML = chords.map(c => { const v = preferred(c); return `<button class="vcard" data-open="${esc(c)}"><div class="name">${esc(sharpen(c))}</div>${v ? diagram(v) : '<div class="cap">no shape</div>'}</button>`; }).join('');
+}
+function playChord(name) { const v = preferred(name); if (!v) { toast('No playable shape found for ' + name); return; } strum(v); }
+function learnChords(title, chords) {
+  const list = [...new Set(chords.map(canon))];
+  openModal(`<h2>${esc(title)}</h2><p class="sub">One shape for each chord. Tap a diagram to hear it.</p>
+    <div class="grid">${list.map(c => { const nm = cl(c), v = preferred(nm); return `<div class="vcard"><button class="stopen" data-hear="${esc(nm)}"><div class="name">${esc(sharpen(nm))}</div>${v ? diagram(v) : '<div class="cap">no shape</div>'}</button><div class="actions"><button class="btn sm ghost" data-ldet="${esc(nm)}">Open in Chords</button><button class="btn sm ghost" data-lpick="${esc(nm)}">Other shapes</button></div></div>`; }).join('')}</div>
+    <div class="row"><span class="grow"></span><button class="btn primary" data-close>Done</button></div>`, b => {
+    b.onclick = e => {
+      const h = e.target.closest('[data-hear]'); if (h) { playChord(h.dataset.hear); return; }
+      const d = e.target.closest('[data-ldet]'); if (d) { closeModal(); showView('chords'); setChordText(d.dataset.ldet); window.scrollTo({ top: 0 }); return; }
+      const k = e.target.closest('[data-lpick]'); if (k) openPicker(k.dataset.lpick);
+    };
+  });
 }
 function openPicker(name) {
   const out = voicingsFor(name);
@@ -738,11 +873,16 @@ function applyLook() {
 function labOpen() {
   closeModal(); let el = $('#lab'); if (el) el.remove();
   el = document.createElement('div'); el.id = 'lab'; el.className = 'lab'; const L = lookNow();
-  el.innerHTML = `<h3>Style lab</h3>` + LOOK_FIELDS.map(([k, n, t, mi, ma, st, u, d]) => `<label><span>${n}</span>${t === 'range' ? `<output>${L[k] != null ? L[k] : d}</output>` : ''}<input data-k="${k}" type="${t}" ${t === 'range' ? `min="${mi}" max="${ma}" step="${st}"` : ''} value="${L[k] != null ? L[k] : d}"></label>`).join('')
+  el.innerHTML = `<div class="labhead"><h3>Style lab</h3><button class="btn sm" id="labMin" aria-label="Minimise">▾</button><button class="btn sm primary" id="labX2" aria-label="Close">✕</button></div><div class="labbody">` + LOOK_FIELDS.map(([k, n, t, mi, ma, st, u, d]) => `<label><span>${n}</span>${t === 'range' ? `<output>${L[k] != null ? L[k] : d}</output>` : ''}<input data-k="${k}" type="${t}" ${t === 'range' ? `min="${mi}" max="${ma}" step="${st}"` : ''} value="${L[k] != null ? L[k] : d}"></label>`).join('')
     + `<label><span>Handwriting</span><select data-k="font">${LOOK_FONTS.map(f => `<option ${L.font === f[0] ? 'selected' : ''}>${f[0]}</option>`).join('')}</select></label>
     <div class="row"><button class="btn sm" id="labCopy">Copy look.json</button><button class="btn sm ghost" id="labDl">Download</button><button class="btn sm danger" id="labReset">Reset</button><button class="btn sm primary" id="labX">Done</button></div>
-    <p style="font-size:.75rem;margin:8px 0 0">Your changes stay on this device. To make them the default for everyone, download look.json and upload it next to index.html.</p>`;
+    <p style="font-size:.75rem;margin:8px 0 0">Your changes stay on this device. To make them the default for everyone, download look.json and upload it next to index.html.</p></div>`;
   document.body.appendChild(el);
+  const kill = () => { el.remove(); document.removeEventListener('keydown', esc_); };
+  const esc_ = e => { if (e.key === 'Escape') kill(); };
+  document.addEventListener('keydown', esc_);
+  $('#labX2', el).onclick = kill;
+  $('#labMin', el).onclick = () => { const m = el.classList.toggle('min'); $('#labMin', el).textContent = m ? '▴' : '▾'; };
   const set = (k, v, o) => { LOOK.local[k] = v; LS.set('fw.look', LOOK.local); applyLook(); if (o) o.textContent = v; };
   el.addEventListener('input', e => { const i = e.target.closest('[data-k]'); if (i) set(i.dataset.k, i.type === 'range' ? +i.value : i.value, i.previousElementSibling && i.previousElementSibling.tagName === 'OUTPUT' ? i.previousElementSibling : null); });
   el.addEventListener('change', e => { const i = e.target.closest('select[data-k]'); if (i) set(i.dataset.k, i.value); });
@@ -750,7 +890,7 @@ function labOpen() {
   $('#labCopy', el).onclick = () => { try { navigator.clipboard.writeText(json()); toast('look.json copied'); } catch (e) { toast('Could not copy; use Download'); } };
   $('#labDl', el).onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([json()], { type: 'application/json' })); a.download = 'look.json'; document.body.appendChild(a); a.click(); a.remove(); };
   $('#labReset', el).onclick = () => { LOOK.local = {}; LS.set('fw.look', {}); applyLook(); labOpen(); };
-  $('#labX', el).onclick = () => el.remove();
+  $('#labX', el).onclick = kill;
 }
 
 /* ================= stickers on the guitar body (anarchy A and friends; make your own) ================= */
@@ -827,6 +967,27 @@ function stkOpen() {
   L.onpointermove = e => { if (!drag) return; const s = cfg().stickers.find(x => x.id === drag.id); s.x = +(e.clientX / innerWidth * 100).toFixed(1); s.y = +(e.clientY / innerHeight * 100).toFixed(1); const d = L.querySelector(`[data-id="${s.id}"]`); if (d) { d.style.left = s.x + '%'; d.style.top = s.y + '%'; } };
   L.onpointerup = () => { if (drag) { drag = null; save(); stkRender(); } };
 }
+
+/* ================= add to home screen ================= */
+const IS_STANDALONE = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+const IS_IOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let A2HS = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); A2HS = e; a2hsBar(); });
+window.addEventListener('appinstalled', () => { A2HS = null; LS.set('fw.a2hsDone', 1); a2hsBar(); });
+function a2hsSteps() {
+  if (IS_IOS) return 'Tap the <b>Share</b> button (the square with an arrow) at the bottom of Safari, then choose <b>Add to Home Screen</b>.';
+  return 'Open your browser menu (⋮) and choose <b>Install app</b> or <b>Add to Home screen</b>.';
+}
+function a2hsBar() {
+  const el = $('#a2hs'); if (!el) return;
+  const show = !IS_STANDALONE && !LS.get('fw.a2hsDone', false) && !LS.get('fw.a2hsHide', false) && (A2HS || IS_IOS || (navigator.maxTouchPoints > 0 && innerWidth < 900));
+  el.hidden = !show; if (!show) return;
+  el.innerHTML = '<b>Add Fretwork to your home screen</b> and open it like an app. <button class="btn sm" id="a2Go">' + (A2HS ? 'Install' : 'How?') + '</button> <button class="btn sm ghost" id="a2No" aria-label="Hide">✕</button>';
+}
+function a2hsAsk() {
+  if (A2HS) { A2HS.prompt(); A2HS.userChoice.finally(() => { A2HS = null; a2hsBar(); }); return; }
+  openModal('<h2>Add to home screen</h2><p>' + a2hsSteps() + '</p><p class="note">Fretwork then gets its own icon and opens full screen, without the browser bars.</p><div class="row"><span class="grow"></span><button class="btn primary" data-close>Got it</button></div>');
+}
 function applyFinish() {
   const f = Object.assign({ hue: 0, sat: .92, bri: 1 }, cfg().finish || {}), r = document.documentElement.style;
   r.setProperty('--hue', f.hue + 'deg'); r.setProperty('--wsat', f.sat); r.setProperty('--wbri', f.bri);
@@ -845,6 +1006,7 @@ function settingsModal() {
     <div class="field"><span>Guitar finish</span>
       <div class="finish" id="stFin">${FINISHES.map(p => `<button class="fin" data-f="${p.id}" aria-label="${p.n}" title="${p.n}" style="--h:${p.hue}deg;--s:${p.sat};--b:${p.bri}"></button>`).join('')}</div>
       <label class="field" style="margin:0"><span>Colour shift</span><input type="range" id="stHue" min="-180" max="180" value="${(c.finish && c.finish.hue) || 0}"></label></div>
+    ${IS_STANDALONE ? '' : '<div class="field"><button class="btn sm" id="stA2">Add to home screen</button></div>'}
     <div class="field row"><button class="btn sm" id="stLab">Tweak the look (style lab)</button><button class="btn sm" id="stStk">Stickers</button></div>
     <div class="toggles">
       <label class="switch"><span>Left-handed diagrams</span><input type="checkbox" id="stLh" ${c.lh ? 'checked' : ''}><i></i></label>
@@ -877,6 +1039,7 @@ function settingsModal() {
     $('#stLang', b).onclick = e => { const x = e.target.closest('[data-l]'); if (x) setLang(x.dataset.l); };
     const fin = () => (c.finish = Object.assign({ hue: 0, sat: .92, bri: 1 }, c.finish || {}));
     $('#stFin', b).onclick = e => { const x = e.target.closest('[data-f]'); if (!x) return; const p = FINISHES.find(q => q.id === x.dataset.f); Object.assign(fin(), { hue: p.hue, sat: p.sat, bri: p.bri }); $('#stHue', b).value = p.hue; save(); applyFinish(); };
+    if ($('#stA2', b)) $('#stA2', b).onclick = a2hsAsk;
     $('#stLab', b).onclick = labOpen;
     $('#stStk', b).onclick = stkOpen;
     $('#stHue', b).oninput = e => { fin().hue = +e.target.value; applyFinish(); };
@@ -1523,7 +1686,9 @@ function init() {
     if (e.target.closest('#btnResetChord')) { resetChordTeacher(S.text); toast('Primary and hidden shapes cleared for ' + S.text); refreshAll(); return; }
     if (e.target.closest('#btnLearn')) { toggleLearned(canon(S.text)); renderChord(); return; }
     if (e.target.closest('#btnTheory')) { thOpen(S.text); return; }
-    if (e.target.closest('#btnPlay') || e.target.closest('#detailDia')) { strum(S.list[S.sel]); return; }
+    if (e.target.closest('#btnPin')) { togglePin(canon(S.text)); renderChord(); return; }
+    if (e.target.closest('#btnSeqAdd')) { seqAdd(canon(S.text)); return; }
+    if (e.target.closest('#btnPlay')) { strum(S.list[S.sel]); return; }
     const m = e.target.closest('[data-mode]'); if (m) { cfg().label = m.dataset.mode; save(); renderChord(); return; }
     if (e.target.closest('#btnPref')) {
       const v = S.list[S.sel], k = prefKey(S.text);
@@ -1531,13 +1696,51 @@ function init() {
       save(); renderChord(); renderMine();
     }
   });
-  document.addEventListener('click', e => { const o = e.target.closest('[data-open]'); if (o && !o.closest('#drawer')) openPicker(o.dataset.open); });
+  document.addEventListener('click', e => {
+    const l = e.target.closest('[data-learnrow]'); if (l) { learnChords(l.dataset.t, l.dataset.learnrow.split(',')); return; }
+    const o = e.target.closest('[data-open]'); if (o && !o.closest('#drawer')) { if (o.closest('#playable,#chartStrip')) playChord(o.dataset.open); else openPicker(o.dataset.open); }
+  });
   $('#mine').addEventListener('click', e => { const o = e.target.closest('[data-open]'); if (o) { setChordText(o.dataset.open); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
   document.addEventListener('click', e => { const o = e.target.closest('#mine [data-open]'); if (o) e.stopImmediatePropagation(); }, true);
 
+  seqInit();
+  $('#btnKeys').onclick = () => { S.keysOpen = !S.keysOpen; applyBeg(); };
+  // tap or swipe across the strings of the big diagram
+  (() => {
+    const D_ = $('#detail'); let down = false, last = -1;
+    const strIdx = e => {
+      const svg = e.target.closest('#detailDia') && D_.querySelector('#detailDia svg'); if (!svg) return -1;
+      const m = svg.getScreenCTM(); if (!m) return -1;
+      const x = (e.clientX - m.e) / m.a, y = (e.clientY - m.f) / m.d;
+      if (y < 38 || y > 216) return -1;
+      const k = Math.round((x - 38) / 22); if (k < 0 || k > 5 || Math.abs(x - 38 - k * 22) > 11) return -1;
+      return cfg().lh ? 5 - k : k;
+    };
+    const twang = i => {
+      const svg = D_.querySelector('#detailDia svg'); if (!svg) return;
+      const k = cfg().lh ? 5 - i : i, ln = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      ln.setAttribute('x1', 38 + k * 22); ln.setAttribute('x2', 38 + k * 22); ln.setAttribute('y1', 42); ln.setAttribute('y2', 212);
+      ln.setAttribute('class', 'twang'); svg.appendChild(ln); setTimeout(() => ln.remove(), 600);
+    };
+    const hit = e => { const i = strIdx(e); if (i < 0 || i === last) return; last = i; strum(S.list[S.sel], i); twang(i); };
+    D_.addEventListener('pointerdown', e => { if (!e.target.closest('#detailDia')) return; down = true; last = -1; const i = strIdx(e); if (i < 0) strum(S.list[S.sel]); else hit(e); });
+    D_.addEventListener('pointermove', e => { if (down) hit(e); });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(t => D_.addEventListener(t, () => { down = false; last = -1; }));
+  })();
+  // header tucks away while scrolling down
+  (() => {
+    let ly = scrollY;
+    addEventListener('scroll', () => {
+      const y = scrollY, d = y - ly;
+      if (y < 70 || d < -6) document.body.classList.remove('deck-hide');
+      else if (d > 6) document.body.classList.add('deck-hide');
+      if (Math.abs(d) > 6) ly = y;
+    }, { passive: true });
+  })();
   $('#startCard').addEventListener('click', e => {
     const l = e.target.closest('[data-learn]'); if (l) { toggleLearned(l.dataset.learn); return; }
-    const o = e.target.closest('[data-st]'); if (o) { setChordText(cl(o.dataset.st)); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+    if (e.target.closest('#heroGo')) { heroPlay(); return; }
+    const o = e.target.closest('[data-st]'); if (o) { setChordText(cl(o.dataset.st)); strum(S.list[S.sel]); return; }
     if (e.target.closest('#stSongs')) { showView('songs'); $('#playable').scrollIntoView({ behavior: 'smooth' }); }
   });
   $('#progs').addEventListener('click', e => {
@@ -1546,6 +1749,7 @@ function init() {
     if (pl) { const p = D.progs.find(x => x.id === pl.dataset.pgplay); if (p) pgPlayer(p.name, p.chords); }
     if (ed) pgEdit(ed.dataset.pgedit);
   });
+  $('#btnLearnSong').onclick = () => { if (S.song) learnChords('Chords in this song', songChordsUI(S.song, S.tr, cfg().flats)); };
   $('#btnPlaySong').onclick = () => {
     if (!S.song) return; const ch = songChordsUI(S.song, S.tr, cfg().flats).map(canon).filter(pgChordOk);
     if (!ch.length) { toast('No playable chords in this song'); return; }
@@ -1561,8 +1765,8 @@ function init() {
   $('#fsDown').onclick = () => { cfg().fs = Math.max(12, cfg().fs - 2); save(); renderSong(); };
   $('#fsUp').onclick = () => { cfg().fs = Math.min(34, cfg().fs + 2); save(); renderSong(); };
   $('#swCharts').onchange = renderStrip;
-  $('#sheet').addEventListener('click', e => { const c = e.target.closest('[data-c]'); if (c) openPicker(c.dataset.c); });
-  $('#sheet').addEventListener('keydown', e => { if (e.key === 'Enter') { const c = e.target.closest('[data-c]'); if (c) openPicker(c.dataset.c); } });
+  $('#sheet').addEventListener('click', e => { const c = e.target.closest('[data-c]'); if (c) playChord(c.dataset.c); });
+  $('#sheet').addEventListener('keydown', e => { if (e.key === 'Enter') { const c = e.target.closest('[data-c]'); if (c) playChord(c.dataset.c); } });
   $('#btnSettings').onclick = settingsModal;
   $('#btnLang').dataset.lang = SK ? 'sk' : 'en'; $('#btnLang').setAttribute('aria-checked', SK);
   $('#btnLang').onclick = () => { $('#btnLang').dataset.lang = SK ? 'en' : 'sk'; setTimeout(() => setLang(SK ? 'en' : 'sk'), 300); };   // let the lever flip first
@@ -1578,7 +1782,8 @@ function init() {
   applyBeg();
   initTheory();
   initTeacher();
-  tuneBar();
+  tuneBar(); a2hsBar();
+  $('#a2hs').addEventListener('click', e => { if (e.target.closest('#a2Go')) a2hsAsk(); if (e.target.closest('#a2No')) { LS.set('fw.a2hsHide', 1); a2hsBar(); } });
   $('#wip').innerHTML = SK
     ? '<b>Rozpracované.</b> Spätná väzba vítaná: <a href="mailto:gitara@lesson.sk">gitara@lesson.sk</a>'
     : '<b>Work in progress.</b> Feedback welcome: <a href="mailto:guitar@lesson.sk">guitar@lesson.sk</a>';
