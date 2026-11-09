@@ -170,6 +170,7 @@ function pluckBuffer(c, midi) {
 function strum(v, only) {   // only = one string index (tap a string); otherwise the whole chord
   if (!cfg().sound || !v) return;
   const c = actx(); if (!c) return;
+  if (only == null && typeof say === 'function') say('strum');
   const tun = F.TUNINGS[cfg().tuning];
   let k = 0; const t0 = c.currentTime + 0.02;
   if (only == null) {   // a new chord damps the previous one so the tails do not smear together
@@ -368,13 +369,14 @@ function tagsFor(v, name) {
 }
 const FIRST4 = ['Em', 'Am', 'D', 'G'];
 const learned = k => !!(cfg().learned || {})[k];   // k = canonical English chord name
-function toggleLearned(k) { const L = cfg().learned = cfg().learned || {}; if (L[k]) delete L[k]; else L[k] = 1; save(); renderStart(); renderPlayable(); }
+function toggleLearned(k) { const L = cfg().learned = cfg().learned || {}; if (L[k]) delete L[k]; else { L[k] = 1; say(FIRST4.every(learned) ? 'learned4' : 'learned1'); } save(); renderStart(); renderPlayable(); }
 const HERO = ['G', 'D', 'Am'];
 let heroTok = 0;
 function heroStop() { heroTok++; document.querySelectorAll('#heroRow .hchip.on').forEach(x => x.classList.remove('on')); const b = $('#heroGo'); if (b) b.textContent = '▶ Play it'; }
 function heroPlay() {
   const b = $('#heroGo'); if (b && b.textContent.startsWith('■')) { heroStop(); return; }
   const tok = ++heroTok, seq = [0, 1, 2, 2, 0, 1, 2, 2]; let i = 0;
+  (cfg().talkSeen = cfg().talkSeen || {}).strum = 1; say('hero');
   if (b) b.textContent = '■ Stop';
   const step = () => {
     if (tok !== heroTok) return;
@@ -405,6 +407,7 @@ function applyBeg() {
   renderStart();
 }
 function renderChord() {
+  ED.on = false; $('#detail').classList.remove('editing');
   const raw = S.text, chord = S.chord, v = S.list[S.sel];
   $('#chordResult').hidden = false;
   const isPref = D.pref[prefKey(raw)] === F.vKey(v), isPrim = primaryKey(raw) === F.vKey(v);
@@ -426,6 +429,7 @@ function renderChord() {
         <button class="btn primary" id="btnPlay">▶ Strum all</button>
         <button class="btn" id="btnPin">${pinned(canon(raw)) ? '📌 Pinned (tap to unpin)' : '📌 Pin to top'}</button>
         <button class="btn" id="btnSeqAdd">＋ Add to sequence</button>
+        <button class="btn" id="btnEdit">✎ Edit shape</button>
         <button class="btn" id="btnPref">${isPref ? '★ My voicing' : '☆ Use in my songs'}</button>
         ${isBeg() ? `<button class="btn" id="btnLearn">${learned(canon(raw)) ? '✓ I can play this' : 'Mark as learned'}</button>` : '<button class="btn ghost" id="btnTheory">Theory ›</button>'}
         ${TP.on ? `<button class="btn teach" id="btnPrimary">${isPrim ? '◆ Primary (tap to clear)' : '◆ Make primary'}</button>
@@ -501,12 +505,37 @@ const PLAYABLE = [
   ['Gloria', 'Them', 'rock & roll', ['E', 'D', 'A'], 'E D A'],
   ['Stand By Me', 'Ben E. King', 'rock & roll', ['G', 'Em', 'C', 'D'], 'G Em C D'],
   ['Blitzkrieg Bop', 'Ramones', 'punk', ['A', 'D', 'E'], 'A D E'],
+  ['About a Girl', 'Nirvana', 'grunge', ['Em', 'G', 'D', 'A'], 'Em G D A'],
   ['Smells Like Teen Spirit', 'Nirvana', 'grunge · power chords', ['F5', 'Bb5', 'Ab5', 'Db5'], 'F5 B♭5 A♭5 D♭5 (riff style)'],
   ['Smoke on the Water', 'Deep Purple', 'rock · power chords', ['G5', 'Bb5', 'C5', 'Db5'], 'G5 B♭5 C5 · G5 B♭5 D♭5 C5'],
   ['Seven Nation Army', 'The White Stripes', 'rock · power chords', ['E5', 'G5', 'D5', 'C5', 'B5'], 'E5 G5 E5 D5 C5 B5 (the famous riff)'],
   ['All the Small Things', 'blink-182', 'punk · power chords', ['G5', 'C5', 'D5'], 'G5 C5 D5'],
   ['Basket Case', 'Green Day', 'punk · power chords', ['E5', 'B5', 'C#5', 'G#5', 'A5'], 'E5 B5 C♯5 G♯5 A5 B5']
 ];
+const playSeq = r => r[4].replace(/\(.*?\)/g, ' ').replace(/♭/g, 'b').replace(/♯/g, '#').split(/[\s·]+/).filter(t => /^[A-G][#b]?(m|5|7)?$/.test(t));
+const FEATURED = [
+  ['Smells Like Teen Spirit', 'Nirvana', 'Four power chords, all the same shape slid along the neck.', ['That is the riff? It is just one shape!', 'Yep. Slide it around. Sounds huge, plays easy.']],
+  ['About a Girl', 'Nirvana', 'Four open chords and you are playing Nirvana.', ['Where is the fancy part?', 'There is none. Four chords, strum, done.']],
+  ['Basket Case', 'Green Day', 'Power chords again: one shape, moved around.', ['Dude, that is way too fast.', 'Slow it down first. Speed comes later.']],
+  ['Good Riddance (Time of Your Life)', 'Green Day', 'Three chords. The one everybody plays round the campfire.', ['Only three chords? Is that cheating?', 'Nope. That is the secret.']]
+];
+const TALK = [['Hey, this is not exactly how I know it.', 'Sure. It is simplified.'], ['Simplified? So it is not the real song?', 'It is the real chords. It should get you started though.'], ['Huh. So I can play it today?', 'Yeah. Press play, strum along. Fancy stuff comes later.']];
+const bubble = (who, t) => `<div class="bub ${who ? 'b2' : 'b1'}"><i>${who ? 'D' : 'S'}</i><p>${esc(t)}</p></div>`;
+function renderFeatured() {
+  const el = $('#featured'); if (!el) return;
+  el.innerHTML = `<h3 class="sect">Play a real song today <small>press play, strum along</small></h3>
+    <div class="talk">${TALK.map(([a, b]) => bubble(0, a) + bubble(1, b)).join('')}</div>
+    <div class="featgrid">${FEATURED.map(([t, a, d, cv]) => {
+      const r = PLAYABLE.find(x => x[0] === t); if (!r) return '';
+      const q = playSeq(r), u = [...new Set(q)];
+      return `<div class="scard feat"><b>${esc(t)}</b><span>${esc(a)} · just ${u.length} chords</span>
+        <div class="herorow">${u.map(c => { const v = preferred(cl(c)); return `<div class="hchip"><div class="name">${esc(sharpen(cl(c)))}</div>${v ? diagram(v) : ''}</div>`; }).join('')}</div>
+        <p class="note" style="margin:4px 0">${esc(d)}</p>
+        <div class="talk sm">${bubble(0, cv[0])}${bubble(1, cv[1])}</div>
+        <p class="progline">${esc(q.map(c => sharpen(cl(c))).join('  ›  '))}</p>
+        <button class="btn primary" data-playsong="${esc(t)}">▶ Play along</button></div>`;
+    }).join('')}</div>`;
+}
 function renderPlayable() {
   const el = $('#playable'); if (!el) return;
   const beg = isBeg();
@@ -519,7 +548,7 @@ function renderPlayable() {
       return `<div class="scard prow ${ok ? 'ok' : ''}"><b>${esc(r[0])}</b><span>${esc(r[1])} · ${esc(r[2])}${ok ? ' · you know these chords' : ''}</span>
         <div class="mini">${r[3].map(c => `<button class="pill" data-open="${esc(cl(c))}">${esc(sharpen(cl(c)))}</button>`).join('')}</div>
         <span class="progline">${esc(r[4])}</span>
-        <button class="btn sm" data-learnrow="${esc(r[3].map(canon).join(','))}" data-t="${esc(r[0])}">Learn chords</button> <a class="btn sm ghost" href="https://duckduckgo.com/?q=${q}" target="_blank" rel="noopener noreferrer">Find chords ↗</a></div>`;
+        <button class="btn sm primary" data-playsong="${esc(r[0])}">▶ Play along</button> <button class="btn sm" data-learnrow="${esc(r[3].map(canon).join(','))}" data-t="${esc(r[0])}">Learn chords</button> <a class="btn sm ghost" href="https://duckduckgo.com/?q=${q}" target="_blank" rel="noopener noreferrer">Find chords ↗</a></div>`;
     }).join('')}`;
 }
 
@@ -581,6 +610,7 @@ function pgClick(strong) {
   o.connect(g).connect(c.destination); o.start(t); o.stop(t + 0.06);
 }
 function pgPlayer(title, chords) {
+  say('playalong');
   const c0 = cfg(); c0.pgSpeed = c0.pgSpeed || 2; c0.pgBeats = c0.pgBeats || 4; if (c0.pgLoop == null) c0.pgLoop = true; if (c0.pgClick == null) c0.pgClick = true;
   const tok = ++PG.tok; let running = false, timer = 0, ci = 0, bt = 0;
   const alive = () => PG.tok === tok && !$('#modal').hidden;
@@ -623,7 +653,7 @@ const pinned = k => (cfg().pins || []).includes(k);
 function togglePin(k) {
   const P = cfg().pins = cfg().pins || [];
   const i = P.indexOf(k); if (i >= 0) P.splice(i, 1); else P.push(k);
-  save(); renderPins();
+  save(); renderPins(); if (P.length) say('pin');
 }
 function renderPins() {
   const el = $('#pinbar'); if (!el) return;
@@ -647,7 +677,7 @@ function seqAdd(k) {
   B[i] = k; SQ.sel = B.findIndex((x, j) => j > i && !x);
   save(); seqOpen(); strum(preferred(cl(k)));
 }
-function seqOpen() { SQ.open = true; SQ.min = false; renderSeq(); }
+function seqOpen() { say('seq'); SQ.open = true; SQ.min = false; renderSeq(); }
 function seqClose() { seqStop(); SQ.prog = null; SQ.open = false; $('#seqwin').hidden = true; }
 function seqStop() { SQ.tok++; SQ.running = false; const b = $('#sqPlay'); if (b) b.textContent = '▶ Play'; document.querySelectorAll('#seqwin .sqbar.now').forEach(x => x.classList.remove('now')); }
 function seqPlay() {
@@ -729,8 +759,133 @@ function seqInit() {
   place(); addEventListener('resize', place); setTimeout(place, 600);
   renderPins();
 }
+
+/* ================= edit a chord shape: drag the finger dots, see if it can be held, name it, save it ================= */
+const ED = { on: false, frets: [], orig: [], base: 1, ni: 0, drag: null };
+function edStart() {
+  const v = S.list[S.sel]; if (!v) return;
+  say('edit');
+  Object.assign(ED, { on: true, frets: v.frets.slice(), orig: v.frets.slice(), base: v.base, ni: 0, drag: null });
+  edRender();
+}
+function edAnalyse() {
+  const fr = ED.frets, fg = F.fingering(fr), id = identify(fr), tun = F.TUNINGS[cfg().tuning], names = cfg().flats ? F.FLAT : F.SHARP;
+  const r = id.res[Math.min(ED.ni, Math.max(0, id.res.length - 1))] || null;
+  const v = { frets: fr.slice(), fingers: fg.fingers, barre: fg.barre, fingerCount: fg.count, base: ED.base,
+    notes: fr.map((f, s) => { if (f < 0) return null; const pc = (tun[s] + f) % 12, t = r && r.chord.tones.find(x => x.pc === pc); return { name: (SK && pc === 10) ? 'Bb' : names[pc], label: t ? t.label : '' }; }) };
+  const fretted = fr.filter(f => f > 0), span = fretted.length ? Math.max(...fretted) - Math.min(...fretted) : 0, played = fr.filter(f => f >= 0).length;
+  let warn = ['ok', 'Playable: ' + fg.count + (fg.count === 1 ? ' finger' : ' fingers') + (fg.barre ? ' (one is a barre)' : '') + '.'];
+  if (fg.count > 4) warn = ['red', 'This shape needs ' + fg.count + ' fingers and a hand has four. Move a dot, mute a string, or turn some of them into a barre.'];
+  else if (span >= 4) warn = ['red', 'A stretch of ' + (span + 1) + ' frets is very hard to hold. Try bringing the dots closer together.'];
+  else if (span === 3) warn = ['warn', 'A wide stretch (4 frets). Possible with bigger hands.'];
+  if (played < 2) warn = ['warn', 'Place at least two notes.'];
+  return { fg, id, r, v, warn, changed: fr.join() !== ED.orig.join() };
+}
+function edRender() {
+  const A = edAnalyse(), box = $('#detail'); box.classList.add('editing');
+  if (A.warn[0] === 'red') say('toomany');
+  if (!$('#editDia')) {
+    box.innerHTML = `<div><div id="editDia"></div><p class="taphint">Drag a finger dot to move it. Tap an empty spot to add a finger, or a dot to lift it. Tap ○ / ✕ above the string to open or mute it.</p>
+      <div class="actions" style="justify-content:center"><button class="btn sm ghost" data-edshift="-1">‹ Lower on the neck</button><button class="btn sm ghost" data-edshift="1">Higher on the neck ›</button></div></div>
+      <div><h2>Editing this shape <small class="sub">edit mode</small></h2><div id="edInfo"></div></div>`;
+  }
+  $('#editDia').innerHTML = diagram(A.v, { names: true });
+  const names = A.id.res.slice(0, 5);
+  $('#edInfo').innerHTML = `<div class="edwarn ${A.warn[0]}">${esc(A.warn[1])}</div>
+    <div class="field"><span>This looks like</span>${names.length ? `<div class="chiprow">${names.map((r, i) => `<button class="chip ${i === Math.min(ED.ni, names.length - 1) ? 'on' : ''}" data-edname="${i}">${esc(sharpen(r.name))}</button>`).join('')}</div>` : '<p class="note">No standard chord matches these notes yet. Move a finger or mute a string.</p>'}</div>
+    <div class="actions">
+      <button class="btn primary" id="edPlay">▶ Strum all</button>
+      <button class="btn" id="edSave" ${A.r ? '' : 'disabled'}>${A.r ? 'Save as my ' + esc(sharpen(A.r.name)) : 'Save as new'}</button>
+      <button class="btn ghost" id="edReset" ${A.changed ? '' : 'disabled'}>↺ Reset</button>
+      <button class="btn ghost" id="edDone">${A.changed ? 'Discard' : 'Done'}</button>
+    </div>`;
+}
+function edCell(e) {
+  const svg = $('#editDia svg'); if (!svg) return null;
+  const m = svg.getScreenCTM(); if (!m) return null;
+  const x = (e.clientX - m.e) / m.a, y = (e.clientY - m.f) / m.d;
+  const k = Math.round((x - 38) / 22); if (k < 0 || k > 5 || Math.abs(x - 38 - k * 22) > 13) return null;
+  const s = cfg().lh ? 5 - k : k;
+  if (y < 42) return y < 0 ? null : { s, top: true };
+  const r = Math.floor((y - 42) / 34) + 1; if (r < 1 || r > 5) return null;
+  return { s, f: ED.base + r - 1 };
+}
+function edClick(e) {
+  if (!ED.on) { if (e.target.closest('#btnEdit')) { edStart(); return true; } return false; }
+  const t = x => e.target.closest(x);
+  if (t('#edPlay')) { strum(edAnalyse().v); return true; }
+  if (t('#edDone')) { renderChord(); return true; }
+  if (t('#edReset')) { ED.frets = ED.orig.slice(); ED.ni = 0; edRender(); return true; }
+  const n = t('[data-edname]'); if (n) { ED.ni = +n.dataset.edname; edRender(); return true; }
+  const sh = t('[data-edshift]');
+  if (sh) {
+    const nb = Math.max(1, Math.min(12, ED.base + +sh.dataset.edshift)), fr = ED.frets.filter(f => f > 0);
+    if (fr.length && (Math.min(...fr) < nb || Math.max(...fr) > nb + 4)) toast('Move the dots first, they would fall off the board');
+    else { ED.base = nb; edRender(); }
+    return true;
+  }
+  if (t('#edSave')) {
+    const A = edAnalyse(); if (!A.r) return true;
+    const v = voicingFromFrets(ED.frets.slice(), A.r.chord), nm = A.r.name;
+    D.pref[prefKey(nm)] = F.vKey(v); save(); renderMine();
+    toast('Saved as your ' + nm); say('saved'); setChordText(nm); return true;
+  }
+  return false;
+}
+(function edPointer() {
+  document.addEventListener('pointerdown', e => {
+    if (!ED.on || !e.target.closest('#editDia')) return;
+    const c = edCell(e); if (!c) return; e.preventDefault();
+    if (c.top) { const cur = ED.frets[c.s]; ED.frets[c.s] = cur === -1 ? 0 : -1; ED.ni = 0; edRender(); return; }
+    const wasDot = ED.frets[c.s] === c.f, snap = ED.frets.slice(); if (wasDot) snap[c.s] = 0;
+    ED.drag = { snap, s: c.s, f: c.f, wasDot, moved: false };
+    if (!wasDot) { ED.frets[c.s] = c.f; ED.ni = 0; edRender(); strum({ frets: ED.frets.map((f, i) => i === c.s ? f : -1) }); }
+  }, { passive: false });
+  document.addEventListener('pointermove', e => {
+    const d = ED.drag; if (!d) return; const c = edCell(e); if (!c || c.top) return;
+    if (c.s === d.s && c.f === d.f && !d.moved) return;
+    d.moved = true; const fr = d.snap.slice(); fr[c.s] = c.f;
+    if (fr.join() !== ED.frets.join()) { ED.frets = fr; ED.ni = 0; edRender(); }
+  });
+  const up = () => {
+    const d = ED.drag; if (!d) return; ED.drag = null;
+    if (d.wasDot && !d.moved) { ED.frets = d.snap; ED.ni = 0; edRender(); }
+  };
+  document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+})();
+const TALKS = {"welcome": [[0, "Uh, where are we?"], [1, "Fretwork. You learn chords here. Poke anything."], [0, "Anything? Cool."]], "hero": [[0, "Is that a real song?"], [1, "Close enough. Three chords, looped."]], "strum": [[0, "Whoa, it made a noise."], [1, "Yeah. Tap the strings one by one too."]], "learned1": [[1, "First chord down."], [0, "Heh. I did a thing."]], "learned4": [[0, "Wait, that is all four?"], [1, "Yep. Now go play a real song in Songs."]], "songs": [[0, "Songs! Do I know these?"], [1, "Probably. Pick one and hit Play along."]], "playalong": [[1, "Slow is fine. Go with the click."], [0, "What if I mess up?"], [1, "Everybody does. Keep going."]], "edit": [[0, "Can I break the chord?"], [1, "Sure. Drag the dots. Reset puts it back."]], "toomany": [[0, "Dude, I only have four fingers."], [1, "That is the warning. Move a dot or mute a string."]], "saved": [[1, "That one is yours now."], [0, "My own chord. Sweet."]], "seq": [[0, "What are the empty boxes?"], [1, "Bars. Fill them with chords, hit play, it loops."]], "pin": [[1, "Pinned up top, so you can keep an eye on it."]], "find": [[0, "Why am I putting fingers on a fake neck?"], [1, "Place the dots and it tells you the chord name."]], "idle": [[0, "Hey, you still there?"], [1, "Try pressing Play it at the top."]]};
+const GD = { q: [], cur: null, i: 0, timer: 0, last: Date.now() };
+function say(key) {
+  const c = cfg(); if (c.talkOff || !TALKS[key]) return;
+  c.talkSeen = c.talkSeen || {}; if (c.talkSeen[key]) return;
+  c.talkSeen[key] = 1; save(); GD.q.push(TALKS[key]); if (!GD.cur) guideNext();
+}
+function guideNext(tries) {
+  clearTimeout(GD.timer);
+  const el = $('#guide'); if (!el) return;
+  if (GD.cur && GD.i < GD.cur.length) { /* continue */ } else { GD.cur = GD.q.shift() || null; GD.i = 0; }
+  if (!GD.cur) { el.hidden = true; return; }
+  if (!$('#modal').hidden && (tries || 0) < 12) { GD.q.unshift(GD.cur); GD.cur = null; GD.timer = setTimeout(() => guideNext((tries || 0) + 1), 2000); el.hidden = true; return; }
+  const [who, text] = GD.cur[GD.i++];
+  el.hidden = false; el.className = 'guide ' + (who ? 'g2' : 'g1');
+  el.innerHTML = `<svg class="gface" viewBox="0 0 40 40" aria-hidden="true">${who
+    ? '<path d="M8 38V16C8 6 14 2 20 2s12 4 12 14v22z" fill="#6b3d22" stroke="#1b0f08" stroke-width="2.5"/><rect x="12" y="12" width="16" height="18" rx="6" fill="#f2cf9e" stroke="#1b0f08" stroke-width="2"/><path d="M14 19h4M22 19h4" stroke="#1b0f08" stroke-width="2.5" stroke-linecap="round"/><path d="M16 26q4 2 8 0" fill="none" stroke="#1b0f08" stroke-width="2" stroke-linecap="round"/>'
+    : '<path d="M7 18C5 8 12 3 20 3s15 5 13 15z" fill="#e6c365" stroke="#1b0f08" stroke-width="2.5"/><circle cx="20" cy="23" r="14" fill="#f2cf9e" stroke="#1b0f08" stroke-width="2.5"/><circle cx="15" cy="21" r="3.2" fill="#fff" stroke="#1b0f08" stroke-width="1.6"/><circle cx="25" cy="21" r="3.2" fill="#fff" stroke="#1b0f08" stroke-width="1.6"/><circle cx="15.6" cy="21.4" r="1.2" fill="#1b0f08"/><circle cx="25.4" cy="21.4" r="1.2" fill="#1b0f08"/><path d="M13 29q7 6 14 0" fill="#fff" stroke="#1b0f08" stroke-width="2"/>'}</svg>
+    <p>${esc(text)}</p><button class="guideX" aria-label="Shush" title="Shush">✕</button>`;
+  GD.timer = setTimeout(guideNext, 2800 + text.length * 55);
+}
+function guideInit() {
+  const el = $('#guide');
+  el.addEventListener('click', e => {
+    if (e.target.closest('.guideX')) { cfg().talkOff = true; save(); GD.q = []; GD.cur = null; clearTimeout(GD.timer); el.hidden = true; toast('Guides are off. Turn them back on in Settings.'); return; }
+    guideNext();
+  });
+  ['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, () => { GD.last = Date.now(); }, true));
+  setInterval(() => { if (Date.now() - GD.last > 60000 && $('#v-chords').classList.contains('on') && $('#modal').hidden) say('idle'); }, 15000);
+  setTimeout(() => say('welcome'), 3000);
+}
 function renderSongList() {
-  renderPlayable(); renderProgs();
+  renderFeatured(); renderPlayable(); renderProgs();
   $('#songList').innerHTML = D.songs.length ? D.songs.map(songCard).join('') : '<div class="empty">No songs yet. Import one: paste text from any chord site, or open a ChordPro / text file.</div>';
   $('#sampleList').innerHTML = SAMPLES.map(songCard).join('');
 }
@@ -738,6 +893,7 @@ function showView(v) {
   $$('.view').forEach(x => x.classList.toggle('on', x.id === 'v-' + v));
   $$('#nav .seg-b').forEach(b => b.classList.toggle('on', b.dataset.view === (v === 'song' ? 'songs' : v)));
   window.scrollTo(0, 0);
+  if (v === 'songs') say('songs'); if (v === 'find') say('find');
 }
 function openSong(id) {
   const s = findSong(id); if (!s) return;
@@ -1031,6 +1187,7 @@ function settingsModal() {
       <label class="switch"><span>Left-handed diagrams</span><input type="checkbox" id="stLh" ${c.lh ? 'checked' : ''}><i></i></label>
       <label class="switch"><span>Use flats (B♭) instead of sharps</span><input type="checkbox" id="stFl" ${c.flats ? 'checked' : ''}><i></i></label>
       <label class="switch"><span>Beginner mode: easy shapes and plain chord names</span><input type="checkbox" id="stBeg" ${isBeg() ? 'checked' : ''}><i></i></label>
+      <label class="switch"><span>Show the two guides</span><input type="checkbox" id="stTalk" ${cfg().talkOff ? '' : 'checked'}><i></i></label>
       <label class="switch"><span>Sound</span><input type="checkbox" id="stSnd" ${c.sound ? 'checked' : ''}><i></i></label>
       <label class="switch"><span>Teacher mode: pick the primary voicing</span><input type="checkbox" id="stTeach" ${TP.on ? 'checked' : ''}><i></i></label>
     </div>
@@ -1063,6 +1220,7 @@ function settingsModal() {
     $('#stStk', b).onclick = stkOpen;
     $('#stHue', b).oninput = e => { fin().hue = +e.target.value; applyFinish(); };
     $('#stHue', b).onchange = () => save();
+    $('#stTalk', b).onchange = e => { c.talkOff = !e.target.checked; save(); if (!c.talkOff) { c.talkSeen = {}; save(); } };
     $('#stBeg', b).onchange = e => { c.beginner = e.target.checked; S.showAll = false; save(); buildKeys(); applyBeg(); updateChord(); renderFind(); };
     $('#stSnd', b).onchange = e => { c.sound = e.target.checked; save(); };
     $('#stTeach', b).onchange = e => { TP.on = e.target.checked; LS.set('fw.teacher.on', TP.on); teacherBody(); refreshAll(); settingsModal(); };
@@ -1705,6 +1863,7 @@ function init() {
     if (e.target.closest('#btnResetChord')) { resetChordTeacher(S.text); toast('Primary and hidden shapes cleared for ' + S.text); refreshAll(); return; }
     if (e.target.closest('#btnLearn')) { toggleLearned(canon(S.text)); renderChord(); return; }
     if (e.target.closest('#btnTheory')) { thOpen(S.text); return; }
+    if (edClick(e)) return;
     if (e.target.closest('#btnPin')) { togglePin(canon(S.text)); renderChord(); return; }
     if (e.target.closest('#btnSeqAdd')) { seqAdd(canon(S.text)); return; }
     if (e.target.closest('#btnPlay')) { strum(S.list[S.sel]); return; }
@@ -1716,13 +1875,15 @@ function init() {
     }
   });
   document.addEventListener('click', e => {
+    const ps = e.target.closest('[data-playsong]');
+    if (ps) { const r = PLAYABLE.find(x => x[0] === ps.dataset.playsong); if (r) { const q = playSeq(r).filter(pgChordOk); if (q.length) pgPlayer(r[0], q); else toast('No playable shapes for this one'); } return; }
     const l = e.target.closest('[data-learnrow]'); if (l) { learnChords(l.dataset.t, l.dataset.learnrow.split(',')); return; }
     const o = e.target.closest('[data-open]'); if (o && !o.closest('#drawer')) { if (o.closest('#playable,#chartStrip')) playChord(o.dataset.open); else openPicker(o.dataset.open); }
   });
   $('#mine').addEventListener('click', e => { const o = e.target.closest('[data-open]'); if (o) { setChordText(o.dataset.open); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
   document.addEventListener('click', e => { const o = e.target.closest('#mine [data-open]'); if (o) e.stopImmediatePropagation(); }, true);
 
-  seqInit();
+  seqInit(); guideInit();
   $('#btnKeys').onclick = () => { S.keysOpen = !S.keysOpen; applyBeg(); };
   // tap or swipe across the strings of the big diagram
   (() => {

@@ -229,3 +229,34 @@ body.has-pins #app{padding-top:130px}
 .sqaddbar{display:flex;flex-direction:column;align-items:center;justify-content:center;border-style:dashed;background:transparent;font-size:1.6rem;font-weight:700}
 .sqaddbar small{font-size:.75rem}
 .seqwin .actions{margin-top:8px}
+
+/* ---- shape editor ---- */
+.detail.editing{outline:4px dashed var(--c-hot);outline-offset:4px}
+#editDia{touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
+.edwarn{padding:8px 10px;border:3px solid var(--ink);border-radius:6px;margin:6px 0;font-weight:700;background:#dff0c9;color:var(--ink)}
+.edwarn.warn{background:#ffe9a3}.edwarn.red{background:#f5b5a6}
+.btn[disabled]{opacity:.45;pointer-events:none}
+
+.featgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:18px}
+.feat{display:flex;flex-direction:column;gap:6px;padding:14px}
+.feat .herorow{flex-wrap:wrap}
+.feat .hchip{width:64px}
+
+.talk{display:flex;flex-direction:column;gap:8px;margin:0 0 14px}
+.bub{display:flex;gap:8px;align-items:flex-end;max-width:92%}
+.bub.b2{align-self:flex-end;flex-direction:row-reverse}
+.bub i{flex:none;width:30px;height:30px;border:3px solid var(--ink);border-radius:50%;display:grid;place-items:center;font-style:normal;font-weight:700;background:var(--c-hot);color:#fff}
+.bub.b2 i{background:var(--c-btn2,#e6c365);color:var(--ink)}
+.bub p{margin:0;padding:6px 12px;background:var(--c-paper);color:var(--ink);border:3px solid var(--ink);border-radius:14px 14px 14px 2px;transform:rotate(-.5deg)}
+.bub.b2 p{border-radius:14px 14px 2px 14px;transform:rotate(.5deg)}
+.talk.sm{margin:4px 0 8px;font-size:.9rem}
+.talk.sm .bub i{width:24px;height:24px;font-size:.75rem}
+
+/* ---- the two guides ---- */
+.guide{position:fixed;z-index:46;left:10px;bottom:calc(var(--deckh,120px) + 8px);width:min(440px,calc(100vw - 20px));display:flex;gap:8px;align-items:flex-end;cursor:pointer}
+.guide.g2{flex-direction:row-reverse}
+.guide[hidden]{display:none}
+.gface{flex:none;width:46px;height:46px;filter:drop-shadow(2px 2px 0 var(--ink))}
+.guide p{margin:0;flex:1;padding:8px 14px;background:var(--c-paper);color:var(--ink);border:3px solid var(--ink);border-radius:14px 14px 14px 2px;box-shadow:3px 3px 0 var(--ink);font-size:1rem}
+.guide.g2 p{border-radius:14px 14px 2px 14px}
+.guideX{position:absolute;top:-10px;right:-4px;width:22px;height:22px;border-radius:50%;border:2px solid var(--ink);background:var(--c-paper);color:var(--ink);padding:0;font-size:.7rem;cursor:pointer}
