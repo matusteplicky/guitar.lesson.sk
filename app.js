@@ -92,7 +92,8 @@ async function cloudInit() {
     const { data } = await sb.auth.getSession();
     if (data.session) await cloudEnter(data.session.user, false);
     else if (isCloud()) switchUser('guest');
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) cloudPull(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { cloudPull(); sharedLoad(); } });
+    sharedLoad();
   } catch (e) { toast('Cloud unavailable. Working on this device.'); }
 }
 async function cloudEnter(user, copyGuest) {
@@ -112,6 +113,7 @@ async function cloudEnter(user, copyGuest) {
   LS.set('fw.data.' + uid, merged);
   switchUser(uid);
   cloudPush(true);
+  sharedLoad();
 }
 function cloudPush(now) {
   if (!sb || !isCloud()) return;
@@ -167,24 +169,52 @@ function pluckBuffer(c, midi) {
   Audio_.cache.set(midi, buf);
   return buf;
 }
-function strum(v, only) {   // only = one string index (tap a string); otherwise the whole chord
+function strum(v, only, o) {   // only = one string index (tap a string); o = { up, gap, vel, chop }
   if (!cfg().sound || !v) return;
   const c = actx(); if (!c) return;
   if (only == null && typeof say === 'function') say('strum');
-  const tun = F.TUNINGS[cfg().tuning];
-  let k = 0; const t0 = c.currentTime + 0.02;
-  if (only == null) {   // a new chord damps the previous one so the tails do not smear together
+  o = o || {};
+  const tun = F.TUNINGS[cfg().tuning], t0 = c.currentTime + 0.02;
+  const idx = []; v.frets.forEach((f, s) => { if (f >= 0 && (only == null || s === only)) idx.push(s); });
+  if (only == null && !o.up) {   // a new chord damps the previous one so the tails do not smear together
     (strum.live || []).forEach(g => { try { g.gain.cancelScheduledValues(t0 - 0.02); g.gain.setValueAtTime(g.gain.value, t0 - 0.02); g.gain.linearRampToValueAtTime(0, t0 + 0.06); } catch (e) {} });
     strum.live = [];
   }
-  v.frets.forEach((f, s) => {
-    if (f < 0 || (only != null && s !== only)) return;
-    const src = c.createBufferSource(); src.buffer = pluckBuffer(c, tun[s] + f);
-    const g = c.createGain(); g.gain.value = 0.2;
-    src.connect(g).connect(c.destination); src.start(t0 + k++ * 0.05);
+  const order = o.up && only == null ? idx.slice(-4).reverse() : idx, gap = o.gap != null ? o.gap : 0.05, vel = o.vel || 1;
+  order.forEach((s, k) => {
+    const src = c.createBufferSource(); src.buffer = pluckBuffer(c, tun[s] + v.frets[s]);
+    const g = c.createGain(), t = t0 + k * gap; g.gain.setValueAtTime(0.2 * vel, t);
+    if (o.chop) g.gain.linearRampToValueAtTime(0, t + 0.11);
+    src.connect(g).connect(c.destination); src.start(t);
     (strum.live = strum.live || []).push(g);
   });
 }
+/* strumming patterns: eight slots per bar of four beats (1 & 2 & 3 & 4 &).  D down, U up, x muted chop, - rest; b m n h = single strings */
+const PATS = [
+  ['down', 'Down', 'D-D-D-D-', 'One slow hit on every beat.'],
+  ['folk', 'Folk', 'D-DU-UDU', 'The campfire strum: down, down-up, up-down-up.'],
+  ['pop', 'Pop', 'D-DUDUDU', 'Keeps going all the way through.'],
+  ['rock', 'Rock', 'DUDUDUDU', 'Even down-up, down-up.'],
+  ['punk', 'Punk', 'DDDDDDDD', 'Fast, all downstrokes.'],
+  ['chug', 'Chug', 'DxDxDxDx', 'Hit, then a muted chop.'],
+  ['arp', 'Picked', 'bmhnhnmn', 'One string at a time, like finger-picking.']
+];
+const PATD = Object.fromEntries(PATS.map(p => [p[0], p[2]]));
+const patArrows = str => [...str].map(ch => ({ D: '↓', U: '↑', x: '✕', '-': '·' }[ch] || '●')).join(' ');
+function playSlot(v, ch) {
+  if (!v || !ch || ch === '-') return;
+  if (ch === 'D') strum(v, null, { gap: 0.014 });
+  else if (ch === 'U') strum(v, null, { up: true, gap: 0.011, vel: 0.65 });
+  else if (ch === 'x') strum(v, null, { gap: 0.01, vel: 0.8, chop: true });
+  else {
+    const idx = []; v.frets.forEach((f, s) => { if (f >= 0) idx.push(s); });
+    const k = { b: 0, m: Math.floor(idx.length / 2), n: idx.length - 2, h: idx.length - 1 }[ch];
+    if (idx[k] != null) strum(v, idx[k], { vel: 0.9 });
+  }
+}
+const isMark = x => typeof x === 'string' && x[0] === '#';
+const isChord = x => !!x && !isMark(x);
+const SECS = ['Intro', 'Verse', 'Pre-chorus', 'Chorus', 'Bridge', 'Solo', 'Outro'];
 
 /* ================= voicing cache ================= */
 const VC = new Map();
@@ -476,6 +506,15 @@ function parsed(song) { const k = song.id + '|' + song.text.length + '|' + song.
 /* a song keeps the notation it was written in; show its chords in the app's notation, transposed */
 function songTc(song, c, tr, flats) { const nt = songNt(song); if (!tr) return F.convert(c, nt, LANG); return F.convert(F.withLocale(nt, () => F.transposeChord(c, tr, flats)), nt, LANG); }
 function songChordsUI(song, tr, flats) { const set = new Set(); parsed(song).lines.forEach(l => l.segs && l.segs.forEach(s => { if (s.c) set.add(songTc(song, s.c, tr || 0, flats)); })); return [...set]; }
+/* a song as a play-along arrangement: section marks (#Verse) and one entry per chord change */
+function songArr(song, tr) {
+  const out = [], flats = cfg().flats;
+  parsed(song).lines.forEach(l => {
+    if (l.t === 'sec') { const n = String(l.text || '').replace(/[\[\]{}:]/g, '').trim(); if (n) out.push('#' + n.slice(0, 24)); }
+    else if (l.segs) { let last = null; l.segs.forEach(x => { if (!x.c) return; const c = canon(songTc(song, x.c, tr || 0, flats)); if (c !== last && pgChordOk(c)) out.push(c); last = c; }); }
+  });
+  return out;
+}
 function detectNt(text) {
   const n = l => F.withLocale(l, () => { const p = F.parseSong(text); let k = 0; p.lines.forEach(x => x.segs && x.segs.forEach(s => { if (s.c) k++; })); return k; });
   const e = n('en'), s = n('sk'); return s > e ? 'sk' : e > s ? 'en' : LANG;
@@ -512,6 +551,12 @@ const PLAYABLE = [
   ['All the Small Things', 'blink-182', 'punk · power chords', ['G5', 'C5', 'D5'], 'G5 C5 D5'],
   ['Basket Case', 'Green Day', 'punk · power chords', ['E5', 'B5', 'C#5', 'G#5', 'A5'], 'E5 B5 C♯5 G♯5 A5 B5']
 ];
+/* strumming style and speed that suit each song: [pattern, speed 1-3] */
+const SONG_STYLE = { 'Smells Like Teen Spirit': ['punk', 2], 'About a Girl': ['folk', 2], 'Basket Case': ['punk', 3], 'Good Riddance (Time of Your Life)': ['arp', 1],
+  'Knockin’ on Heaven’s Door': ['folk', 1], 'Sweet Home Alabama': ['rock', 2], 'Bad Moon Rising': ['pop', 2], 'Brown Eyed Girl': ['pop', 2], 'Zombie': ['rock', 2],
+  'Highway to Hell': ['chug', 2], 'Back in Black': ['chug', 2], 'Hey Joe': ['folk', 1], 'La Bamba': ['pop', 3], 'Twist and Shout': ['rock', 3], 'Louie Louie': ['rock', 2],
+  'Wild Thing': ['punk', 2], 'Gloria': ['rock', 2], 'Stand By Me': ['pop', 1], 'Blitzkrieg Bop': ['punk', 3], 'Smoke on the Water': ['down', 2], 'Seven Nation Army': ['down', 2], 'All the Small Things': ['punk', 3] };
+const songStyle = r => SONG_STYLE[r[0]] || ['rock', 2];
 const playSeq = r => r[4].replace(/\(.*?\)/g, ' ').replace(/♭/g, 'b').replace(/♯/g, '#').split(/[\s·]+/).filter(t => /^[A-G][#b]?(m|5|7)?$/.test(t));
 const FEATURED = [
   ['Smells Like Teen Spirit', 'Nirvana', 'Four power chords, all the same shape slid along the neck.', ['That is the riff? It is just one shape!', 'Yep. Slide it around. Sounds huge, plays easy.']],
@@ -533,7 +578,7 @@ function renderFeatured() {
         <p class="note" style="margin:4px 0">${esc(d)}</p>
         <div class="talk sm">${bubble(0, cv[0])}${bubble(1, cv[1])}</div>
         <p class="progline">${esc(q.map(c => sharpen(cl(c))).join('  ›  '))}</p>
-        <button class="btn primary" data-playsong="${esc(t)}">▶ Play along</button></div>`;
+        <div class="row"><button class="btn primary" data-playsong="${esc(t)}">▶ Play along</button><button class="btn sm" data-copysong="${esc(t)}">Edit: make my own</button></div></div>`;
     }).join('')}</div>`;
 }
 function renderPlayable() {
@@ -548,7 +593,7 @@ function renderPlayable() {
       return `<div class="scard prow ${ok ? 'ok' : ''}"><b>${esc(r[0])}</b><span>${esc(r[1])} · ${esc(r[2])}${ok ? ' · you know these chords' : ''}</span>
         <div class="mini">${r[3].map(c => `<button class="pill" data-open="${esc(cl(c))}">${esc(sharpen(cl(c)))}</button>`).join('')}</div>
         <span class="progline">${esc(r[4])}</span>
-        <button class="btn sm primary" data-playsong="${esc(r[0])}">▶ Play along</button> <button class="btn sm" data-learnrow="${esc(r[3].map(canon).join(','))}" data-t="${esc(r[0])}">Learn chords</button> <a class="btn sm ghost" href="https://duckduckgo.com/?q=${q}" target="_blank" rel="noopener noreferrer">Find chords ↗</a></div>`;
+        <button class="btn sm primary" data-playsong="${esc(r[0])}">▶ Play along</button> <button class="btn sm" data-copysong="${esc(r[0])}">Edit: make my own</button> <button class="btn sm" data-learnrow="${esc(r[3].map(canon).join(','))}" data-t="${esc(r[0])}">Learn chords</button> <a class="btn sm ghost" href="https://duckduckgo.com/?q=${q}" target="_blank" rel="noopener noreferrer">Find chords ↗</a></div>`;
     }).join('')}`;
 }
 
@@ -560,7 +605,7 @@ function renderProgs() {
   const L = D.progs || [];
   el.innerHTML = `<div class="rowbar"><h3 class="sect" style="margin:0">Progressions</h3><button class="btn sm" id="pgNew">＋ New progression</button></div>`
     + (L.length ? L.map(p => `<div class="scard prow"><b>${esc(p.name || 'Untitled')}</b>
-        <div class="mini">${p.chords.map(c => `<span class="pill">${c ? esc(sharpen(cl(c))) : '–'}</span>`).join('')}</div>
+        <div class="mini">${p.chords.map(c => isMark(c) ? `<span class="pill sec">${esc(c.slice(1))}</span>` : `<span class="pill">${c ? esc(sharpen(cl(c))) : '–'}</span>`).join('')}</div>
         <div class="row"><button class="btn sm primary" data-pgplay="${esc(p.id)}">▶ Play</button><button class="btn sm ghost" data-pgedit="${esc(p.id)}">Edit</button></div></div>`).join('')
       : '<p class="note" style="margin:6px 0 10px">Save a sequence of chords, such as Em C G D, and let the app play it for you to practise along.</p>');
 }
@@ -609,16 +654,19 @@ function pgClick(strong) {
   o.frequency.value = strong ? 1500 : 1000; g.gain.setValueAtTime(strong ? 0.12 : 0.06, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
   o.connect(g).connect(c.destination); o.start(t); o.stop(t + 0.06);
 }
-function pgPlayer(title, chords) {
-  say('playalong');
-  const c0 = cfg(); c0.pgSpeed = c0.pgSpeed || 2; c0.pgBeats = c0.pgBeats || 4; if (c0.pgLoop == null) c0.pgLoop = true; if (c0.pgClick == null) c0.pgClick = true;
-  const tok = ++PG.tok; let running = false, timer = 0, ci = 0, bt = 0;
+function pgPlayer(title, chords, o) {
+  o = o || {}; say('playalong');
+  const c0 = cfg(); c0.pgSpeed = o.spd || c0.pgSpeed || 2; c0.pgBeats = o.bts || c0.pgBeats || 4; if (c0.pgLoop == null) c0.pgLoop = true; if (c0.pgClick == null) c0.pgClick = true;
+  let pat = o.pat || c0.pgPat || 'folk';
+  const tok = ++PG.tok; let running = false, timer = 0, ci = 0, slot = 0, next = 0;
   const alive = () => PG.tok === tok && !$('#modal').hidden;
   const seg = (id, opts, cur) => `<nav class="seg" id="${id}">${opts.map(([v, l]) => `<button class="seg-b ${cur === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</nav>`;
   openModal(`<h2>${esc(title)}</h2>
+    <div id="plSec" class="plsec">&nbsp;</div>
     <div id="plDia" style="text-align:center;min-height:200px"></div>
-    <div class="notepills" id="plSeq" style="justify-content:center">${chords.map((c, i) => `<span class="pill" data-i="${i}">${c ? esc(sharpen(cl(c))) : '–'}</span>`).join('')}</div>
+    <div class="notepills" id="plSeq" style="justify-content:center">${chords.map((c, i) => isMark(c) ? `<span class="pill sec" data-i="${i}">${esc(c.slice(1))}</span>` : `<span class="pill" data-i="${i}">${c ? esc(sharpen(cl(c))) : '–'}</span>`).join('')}</div>
     <div class="row" style="justify-content:center;margin:12px 0"><button class="btn primary" id="plGo">▶ Play</button></div>
+    <div class="field"><span>Strumming</span><div class="chiprow" id="plPat">${PATS.map(p => `<button class="chip ${p[0] === pat ? 'on' : ''}" data-p="${p[0]}">${p[1]}</button>`).join('')}</div><p class="note" id="plArr" style="margin:6px 0 0"></p></div>
     <div class="field"><span>Speed</span>${seg('plSpd', [[1, 'Slow'], [2, 'Medium'], [3, 'Fast']], c0.pgSpeed)}</div>
     <div class="field"><span>Beats per chord</span>${seg('plBts', [[1, '1'], [2, '2'], [4, '4']], c0.pgBeats)}</div>
     <div class="toggles"><label class="switch"><span>Loop</span><input type="checkbox" id="plLoop" ${c0.pgLoop ? 'checked' : ''}><i></i></label>
@@ -630,19 +678,29 @@ function pgPlayer(title, chords) {
       $$('#plSeq .pill', b).forEach((p, k) => p.classList.toggle('root', k === i));
     };
     const stop = () => { running = false; clearTimeout(timer); $('#plGo', b).textContent = '▶ Play'; };
+    const arrows = () => { const p = PATS.find(x => x[0] === pat) || PATS[1]; $('#plArr', b).textContent = patArrows(p[2]) + '   ' + p[3]; };
+    const setSec = m => { $('#plSec', b).textContent = m.slice(1); };
+    const skip = () => { while (ci < chords.length && isMark(chords[ci])) { setSec(chords[ci]); ci++; } };
     const step = () => {
       if (!running || !alive()) { running = false; return; }
-      if (bt === 0) { show(ci); if (chords[ci]) strum(preferred(cl(chords[ci]))); }
-      if (c0.pgClick) pgClick(bt === 0);
-      const ms = [0, 900, 650, 450][c0.pgSpeed];
-      bt++;
-      if (bt >= c0.pgBeats) { bt = 0; ci++; if (ci >= chords.length) { if (c0.pgLoop) ci = 0; else { timer = setTimeout(() => { stop(); ci = 0; }, ms); return; } } }
-      timer = setTimeout(step, ms);
+      if (slot === 0) {
+        skip();
+        if (ci >= chords.length) { if (c0.pgLoop) { ci = 0; skip(); } else { stop(); ci = 0; return; } }
+        if (ci >= chords.length) { stop(); return; }
+        show(ci);
+      }
+      const ch = chords[ci];
+      if (c0.pgClick && slot % 2 === 0) pgClick(slot === 0);
+      if (ch) playSlot(preferred(cl(ch)), (PATD[pat] || 'D-D-D-D-')[slot]);
+      if (++slot >= c0.pgBeats * 2) { slot = 0; ci++; }
+      next += [0, 900, 650, 450][c0.pgSpeed] / 2;
+      timer = setTimeout(step, Math.max(0, next - performance.now()));
     };
-    show(0);
-    $('#plGo', b).onclick = () => { if (running) { stop(); return; } running = true; ci = 0; bt = 0; $('#plGo', b).textContent = '■ Stop'; step(); };
+    arrows(); show(Math.max(0, chords.findIndex(isChord)));
+    $('#plGo', b).onclick = () => { if (running) { stop(); return; } running = true; ci = 0; slot = 0; next = performance.now(); $('#plGo', b).textContent = '■ Stop'; step(); };
+    $('#plPat', b).onclick = e => { const x = e.target.closest('[data-p]'); if (!x) return; pat = x.dataset.p; c0.pgPat = pat; save(); $$('#plPat .chip', b).forEach(y => y.classList.toggle('on', y === x)); arrows(); };
     $('#plSpd', b).onclick = e => { const x = e.target.closest('[data-v]'); if (!x) return; c0.pgSpeed = +x.dataset.v; save(); $$('#plSpd .seg-b', b).forEach(y => y.classList.toggle('on', y === x)); };
-    $('#plBts', b).onclick = e => { const x = e.target.closest('[data-v]'); if (!x) return; c0.pgBeats = +x.dataset.v; bt = 0; save(); $$('#plBts .seg-b', b).forEach(y => y.classList.toggle('on', y === x)); };
+    $('#plBts', b).onclick = e => { const x = e.target.closest('[data-v]'); if (!x) return; c0.pgBeats = +x.dataset.v; slot = 0; save(); $$('#plBts .seg-b', b).forEach(y => y.classList.toggle('on', y === x)); };
     $('#plLoop', b).onchange = e => { c0.pgLoop = e.target.checked; save(); };
     $('#plClk', b).onchange = e => { c0.pgClick = e.target.checked; save(); };
   });
@@ -663,11 +721,13 @@ function renderPins() {
 }
 const SQ = { tok: 0, running: false, sel: -1, min: false };
 function seqBars() { return SQ.prog ? SQ.prog.bars : (cfg().seq = cfg().seq || ['', '', '', '']); }
-function seqLoad(id) {   // open the sequence window on a saved progression (or a new one)
-  const p = id && (D.progs || []).find(x => x.id === id);
-  SQ.prog = { id: p ? p.id : null, name: p ? p.name : '', bars: p ? p.chords.slice() : (seqBars().some(Boolean) ? seqBars().slice() : ['', '', '', '']) };
+function seqLoad(id, seed) {   // open the sequence window on a saved progression, a seed (song / copy) or a new one
+  const p = id && (D.progs || []).find(x => x.id === id), c0 = cfg();
+  if (p && p.spd) c0.pgSpeed = p.spd; if (p && p.bts) c0.pgBeats = p.bts;
+  if (seed && seed.spd) c0.pgSpeed = seed.spd;
+  SQ.prog = { id: p ? p.id : null, name: p ? p.name : (seed && seed.name) || '', pat: (p && p.pat) || (seed && seed.pat) || '', bars: p ? p.chords.slice() : seed ? seed.bars.slice() : (seqBars().some(isChord) ? seqBars().slice() : ['', '', '', '']) };
   if (SQ.prog.bars.length < 2) SQ.prog.bars.push('');
-  SQ.sel = SQ.prog.bars.findIndex(x => !x); seqStop(); seqOpen();
+  SQ.sel = SQ.prog.bars.findIndex(x => !x); seqStop(); $('#seqwin').innerHTML = ''; seqOpen();
 }
 function seqAdd(k) {
   if (!pgChordOk(k)) { toast('I can’t find a playable shape for “' + cl(k) + '”'); return; }
@@ -679,24 +739,27 @@ function seqAdd(k) {
 }
 function seqOpen() { say('seq'); SQ.open = true; SQ.min = false; renderSeq(); }
 function seqClose() { seqStop(); SQ.prog = null; SQ.open = false; $('#seqwin').hidden = true; }
-function seqStop() { SQ.tok++; SQ.running = false; const b = $('#sqPlay'); if (b) b.textContent = '▶ Play'; document.querySelectorAll('#seqwin .sqbar.now').forEach(x => x.classList.remove('now')); }
+function seqStop() { SQ.tok++; SQ.running = false; const b = $('#sqPlay'); if (b) b.textContent = '▶ Play'; document.querySelectorAll('#seqwin .now').forEach(x => x.classList.remove('now')); const n = $('#sqNow'); if (n) n.textContent = ''; }
+const seqPat = () => (SQ.prog && SQ.prog.pat) || cfg().pgPat || 'folk';
 function seqPlay() {
   if (SQ.running) { seqStop(); return; }
   const c0 = cfg(); c0.pgSpeed = c0.pgSpeed || 2; c0.pgBeats = c0.pgBeats || 4; if (c0.pgClick == null) c0.pgClick = true;
-  const B = seqBars(); if (!B.some(Boolean)) { toast('Add a chord to a bar first'); return; }
+  if (!seqBars().some(isChord)) { toast('Add a chord to a bar first'); return; }
   const tok = ++SQ.tok; SQ.running = true; $('#sqPlay').textContent = '■ Stop';
-  let i = 0, bt = 0;
+  let i = 0, slot = 0, next = performance.now();
   const step = () => {
     if (tok !== SQ.tok) return;
-    const bars = seqBars();
-    if (bt === 0) {
-      document.querySelectorAll('#seqwin .sqbar').forEach((x, j) => x.classList.toggle('now', j === i));
-      if (bars[i]) strum(preferred(cl(bars[i])));
+    const bars = seqBars(), pat = PATD[seqPat()] || PATD.folk;
+    if (!bars.some(isChord)) { seqStop(); return; }
+    if (slot === 0) {
+      let g = 0; while (isMark(bars[i]) && g++ <= bars.length) { const n = $('#sqNow'); if (n) n.textContent = bars[i].slice(1); i = (i + 1) % bars.length; }
+      document.querySelectorAll('#seqwin [data-b]').forEach(x => x.classList.toggle('now', +x.dataset.b === i));
     }
-    if (c0.pgClick) pgClick(bt === 0);
-    bt++;
-    if (bt >= c0.pgBeats) { bt = 0; i++; if (i >= bars.length) i = 0; }
-    setTimeout(step, [0, 900, 650, 450][c0.pgSpeed]);
+    if (c0.pgClick && slot % 2 === 0) pgClick(slot === 0);
+    if (bars[i] && isChord(bars[i])) playSlot(preferred(cl(bars[i])), pat[slot]);
+    if (++slot >= c0.pgBeats * 2) { slot = 0; i = (i + 1) % bars.length; }
+    next += [0, 900, 650, 450][c0.pgSpeed] / 2;
+    setTimeout(step, Math.max(0, next - performance.now()));
   };
   step();
 }
@@ -708,16 +771,21 @@ function renderSeq() {
   el.innerHTML = `<div class="sqhead"><b>${SQ.prog ? (SQ.prog.id ? 'Edit progression' : 'New progression') : 'Sequence'}</b><button class="btn sm" id="sqMin" aria-label="Minimise">${SQ.min ? '▴' : '▾'}</button><button class="btn sm primary" id="sqX" aria-label="Close">✕</button></div>
   <div class="sqbody">
     ${SQ.prog ? `<label class="field"><span>Name</span><input id="sqName" value="${esc(SQ.prog.name)}" placeholder="e.g. My first four" maxlength="50"></label>` : ''}
-    <div class="sqbars">${B.map((k, i) => `<div class="sqbar ${i === SQ.sel ? 'sel' : ''} ${k ? '' : 'empty'}" data-b="${i}"><span class="n">${i + 1}</span>${k ? (() => { const nm = cl(k), v = preferred(nm); return `<b>${esc(sharpen(nm))}</b>${v ? diagram(v) : ''}`; })() : '<i>empty</i>'}<button class="bx" data-bx="${i}" aria-label="${k ? 'Empty this bar' : 'Remove this bar'}">✕</button></div>`).join('')}
+    <div class="sqbars">${(() => { let n = 0; return B.map((k, i) => isMark(k)
+      ? `<div class="sqsec ${i === SQ.sel ? 'sel' : ''}" data-b="${i}"><b>${esc(k.slice(1))}</b><button class="bx" data-bx="${i}" aria-label="Remove this section mark">✕</button></div>`
+      : `<div class="sqbar ${i === SQ.sel ? 'sel' : ''} ${k ? '' : 'empty'}" data-b="${i}"><span class="n">${++n}</span>${k ? (() => { const nm = cl(k), v = preferred(nm); return `<b>${esc(sharpen(nm))}</b>${v ? diagram(v) : ''}`; })() : '<i>empty</i>'}<button class="bx" data-bx="${i}" aria-label="${k ? 'Empty this bar' : 'Remove this bar'}">✕</button></div>`).join(''); })()}
       <button class="sqaddbar" id="sqAddBar" aria-label="Add an empty bar">＋<small>bar</small></button></div>
+    <div class="field"><span>Mark a section (goes before the picked bar, or at the end)</span><div class="chiprow" id="sqSecs">${SECS.map(x => `<button class="chip" data-sec="${x}">${x}</button>`).join('')}</div></div>
     <div class="inputrow"><div class="engraved"><input id="sqIn" placeholder="Type a chord, e.g. Em" autocomplete="off" autocapitalize="off" spellcheck="false"></div><button class="btn" id="sqAdd">Add</button></div>
     <div class="actions">
       <button class="btn primary" id="sqPlay">${SQ.running ? '■ Stop' : '▶ Play'}</button>
       <button class="btn sm" id="sqSpd">${['', 'Slow', 'Medium', 'Fast'][c0.pgSpeed]}</button>
       <button class="btn sm" id="sqBts">${c0.pgBeats} beats a bar</button>
+      <span class="lbl">Strumming</span><button class="btn sm" id="sqPat">${(PATS.find(x => x[0] === seqPat()) || PATS[1])[1]}</button>
       ${SQ.prog ? `<button class="btn sm primary" id="sqSave">${SQ.prog.id ? 'Save changes' : 'Save progression'}</button>${SQ.prog.id ? '<button class="btn sm danger" id="sqDel">Delete</button>' : ''}` : '<button class="btn sm ghost" id="sqSave">Save as progression</button>'}
       <button class="btn sm ghost" id="sqClear">Clear all</button>
     </div>
+    <p class="note" style="margin:6px 0 0"><b id="sqNow"></b> ${patArrows((PATS.find(x => x[0] === seqPat()) || PATS[1])[2])}</p>
     <p class="note" style="margin:6px 0 0">Tap a bar to pick it, then use “＋ Add to sequence” on any chord. An empty bar is a rest.</p>
   </div>`;
 }
@@ -728,21 +796,24 @@ function seqInit() {
     if (t('#sqX')) { seqClose(); return; }
     if (t('#sqMin')) { SQ.min = !SQ.min; renderSeq(); return; }
     if (SQ.prog && $('#sqName')) SQ.prog.name = $('#sqName').value;
-    const bx = t('[data-bx]'); if (bx) { const i = +bx.dataset.bx; if (B[i]) B[i] = ''; else if (B.length > 1) { B.splice(i, 1); if (SQ.sel >= B.length) SQ.sel = -1; } save(); renderSeq(); return; }
-    const b = t('[data-b]'); if (b) { const i = +b.dataset.b; SQ.sel = i; if (B[i]) strum(preferred(cl(B[i]))); renderSeq(); return; }
+    const sc = t('[data-sec]'); if (sc) { const at = SQ.sel >= 0 && SQ.sel < B.length ? SQ.sel : B.length; B.splice(at, 0, '#' + sc.dataset.sec); SQ.sel = at + 1 < B.length ? at + 1 : -1; save(); renderSeq(); return; }
+    if (t('#sqPat')) { const cur = PATS.findIndex(x => x[0] === seqPat()), nx = PATS[(cur + 1) % PATS.length][0]; if (SQ.prog) SQ.prog.pat = nx; else cfg().pgPat = nx; save(); renderSeq(); return; }
+    const bx = t('[data-bx]'); if (bx) { const i = +bx.dataset.bx; if (isMark(B[i])) { B.splice(i, 1); if (SQ.sel >= B.length) SQ.sel = -1; } else if (B[i]) B[i] = ''; else if (B.filter(x => !isMark(x)).length > 1) { B.splice(i, 1); if (SQ.sel >= B.length) SQ.sel = -1; } save(); renderSeq(); return; }
+    const b = t('[data-b]'); if (b) { const i = +b.dataset.b; SQ.sel = i; if (isChord(B[i])) strum(preferred(cl(B[i]))); renderSeq(); return; }
     if (t('#sqAddBar')) { B.push(''); if (SQ.prog) SQ.prog.name = ($('#sqName') || {}).value || SQ.prog.name; SQ.sel = B.length - 1; save(); renderSeq(); return; }
     if (t('#sqAdd')) { const v = $('#sqIn').value.trim(); if (v) { seqAdd(canon(v)); } return; }
     if (t('#sqPlay')) { seqPlay(); return; }
     if (t('#sqSpd')) { const c = cfg(); c.pgSpeed = c.pgSpeed % 3 + 1; save(); renderSeq(); return; }
     if (t('#sqBts')) { const c = cfg(); c.pgBeats = c.pgBeats === 1 ? 2 : c.pgBeats === 2 ? 4 : 1; save(); renderSeq(); return; }
     if (t('#sqSave')) {
-      if (!SQ.prog) { if (!B.some(Boolean)) { toast('Add a chord first'); return; } seqLoad(null); return; }
-      if (!B.some(Boolean)) { toast('Add at least one chord'); return; }
+      if (!SQ.prog) { if (!B.some(isChord)) { toast('Add a chord first'); return; } seqLoad(null); return; }
+      if (!B.some(isChord)) { toast('Add at least one chord'); return; }
       const ch = B.slice(); while (ch.length && !ch[ch.length - 1]) ch.pop();
-      const nm = ($('#sqName').value || '').trim() || ch.filter(Boolean).slice(0, 4).map(c => cl(c)).join(' ');
+      const nm = ($('#sqName').value || '').trim() || ch.filter(isChord).slice(0, 4).map(c => cl(c)).join(' ');
+      const extra = { pat: seqPat(), spd: cfg().pgSpeed, bts: cfg().pgBeats };
       D.progs = D.progs || [];
-      if (SQ.prog.id) { const ex = D.progs.find(x => x.id === SQ.prog.id); if (ex) { ex.name = nm; ex.chords = ch; } }
-      else { SQ.prog.id = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4); D.progs.unshift({ id: SQ.prog.id, name: nm, chords: ch }); }
+      if (SQ.prog.id) { const ex = D.progs.find(x => x.id === SQ.prog.id); if (ex) { ex.name = nm; ex.chords = ch; Object.assign(ex, extra); } }
+      else { SQ.prog.id = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4); D.progs.unshift(Object.assign({ id: SQ.prog.id, name: nm, chords: ch }, extra)); }
       SQ.prog.name = nm; save(); renderProgs(); renderSeq(); toast('Progression saved'); return;
     }
     if (t('#sqDel')) { if (!confirm('Delete this progression?')) return; D.progs = D.progs.filter(x => x.id !== SQ.prog.id); save(); renderProgs(); seqClose(); return; }
@@ -796,6 +867,7 @@ function edRender() {
     <div class="actions">
       <button class="btn primary" id="edPlay">▶ Strum all</button>
       <button class="btn" id="edSave" ${A.r ? '' : 'disabled'}>${A.r ? 'Save as my ' + esc(sharpen(A.r.name)) : 'Save as new'}</button>
+      ${TP.on && A.r ? '<button class="btn teach" id="edPrimary">◆ Make the default for everyone</button>' : ''}
       <button class="btn ghost" id="edReset" ${A.changed ? '' : 'disabled'}>↺ Reset</button>
       <button class="btn ghost" id="edDone">${A.changed ? 'Discard' : 'Done'}</button>
     </div>`;
@@ -823,6 +895,11 @@ function edClick(e) {
     if (fr.length && (Math.min(...fr) < nb || Math.max(...fr) > nb + 4)) toast('Move the dots first, they would fall off the board');
     else { ED.base = nb; edRender(); }
     return true;
+  }
+  if (t('#edPrimary')) {
+    const A = edAnalyse(); if (!A.r) return true;
+    const nm = A.r.name; TP.local[prefKey(nm)] = F.vKey(voicingFromFrets(ED.frets.slice(), A.r.chord)); LS.set('fw.teacher.primary', TP.local);
+    VC.clear(); toast(nm + ': set as default. Publish it from Settings or the Defaults board.'); setChordText(nm); return true;
   }
   if (t('#edSave')) {
     const A = edAnalyse(); if (!A.r) return true;
@@ -1189,11 +1266,13 @@ function settingsModal() {
       <label class="switch"><span>Beginner mode: easy shapes and plain chord names</span><input type="checkbox" id="stBeg" ${isBeg() ? 'checked' : ''}><i></i></label>
       <label class="switch"><span>Show the two guides</span><input type="checkbox" id="stTalk" ${cfg().talkOff ? '' : 'checked'}><i></i></label>
       <label class="switch"><span>Sound</span><input type="checkbox" id="stSnd" ${c.sound ? 'checked' : ''}><i></i></label>
-      <label class="switch"><span>Teacher mode: pick the primary voicing</span><input type="checkbox" id="stTeach" ${TP.on ? 'checked' : ''}><i></i></label>
+      ${(!cloudOn || TP.can !== false) ? `<label class="switch"><span>Teacher mode: pick the primary voicing</span><input type="checkbox" id="stTeach" ${TP.on ? 'checked' : ''}><i></i></label>` : ''}
     </div>
     ${TP.on ? `<div class="field"><span>Primary voicings (${Object.keys(primaryMerged()).length}) · hidden shapes (${Object.values(hiddenMerged()).reduce((n, a) => n + a.length, 0)})</span>
       <p class="note">Open a chord and press “Make primary” under its diagram, or “Hide this shape” to remove a shape for everyone else (you still see it, dimmed). “Reset this chord” clears both. Primary shapes show as Recommended and open first for everyone. Export the file and save it as <b>primary.json</b> next to index.html to publish your picks.</p>
-      <div class="row" style="margin-top:6px"><button class="btn sm" id="tcExport">Export primary.json</button>
+      <div class="row" style="margin-top:6px"><button class="btn sm primary" id="tcBoard">Defaults board</button>
+      ${TP.can ? '<button class="btn sm primary" id="tcPublish">Publish to everyone</button>' : ''}
+      <button class="btn sm" id="tcExport">Export primary.json</button>
       <label class="btn sm ghost" style="display:inline-flex;align-items:center">Import<input type="file" id="tcImport" accept="application/json,.json" hidden></label>
       <button class="btn sm danger" id="tcClear">Clear my changes</button></div></div>` : ''}
     <div class="row"><span class="grow"></span><button class="btn primary" data-close>Done</button></div>`, b => {
@@ -1223,7 +1302,9 @@ function settingsModal() {
     $('#stTalk', b).onchange = e => { c.talkOff = !e.target.checked; save(); if (!c.talkOff) { c.talkSeen = {}; save(); } };
     $('#stBeg', b).onchange = e => { c.beginner = e.target.checked; S.showAll = false; save(); buildKeys(); applyBeg(); updateChord(); renderFind(); };
     $('#stSnd', b).onchange = e => { c.sound = e.target.checked; save(); };
-    $('#stTeach', b).onchange = e => { TP.on = e.target.checked; LS.set('fw.teacher.on', TP.on); teacherBody(); refreshAll(); settingsModal(); };
+    if ($('#tcBoard', b)) $('#tcBoard', b).onclick = () => boardOpen(0);
+    if ($('#tcPublish', b)) $('#tcPublish', b).onclick = async () => { await publishDefaults(); settingsModal(); };
+    if ($('#stTeach', b)) $('#stTeach', b).onchange = e => { TP.on = e.target.checked; LS.set('fw.teacher.on', TP.on); teacherBody(); refreshAll(); settingsModal(); };
     if ($('#tcExport', b)) {
       $('#tcExport', b).onclick = exportPrimary;
       $('#tcImport', b).onchange = importPrimary;
@@ -1257,7 +1338,7 @@ function cloudModal() {
       <div class="row"><button class="btn" id="pfOut">Sign out</button><button class="btn ghost" id="pfExp">Export backup</button>
       <label class="btn ghost" style="display:inline-flex;align-items:center">Import backup<input type="file" id="pfImp" accept="application/json,.json" hidden></label>
       <span class="grow"></span><button class="btn" data-close>Close</button></div>`, b => {
-      $('#pfOut', b).onclick = async () => { closeModal(); await sb.auth.signOut(); switchUser('guest'); toast('Signed out'); };
+      $('#pfOut', b).onclick = async () => { closeModal(); await sb.auth.signOut(); switchUser('guest'); sharedLoad(); toast('Signed out'); };
       $('#pfExp', b).onclick = exportBackup;
       $('#pfImp', b).onchange = importBackup;
     });
@@ -1622,7 +1703,31 @@ function initTheory() {
 
 /* ================= Teacher mode: choose the primary (recommended) voicing ================= */
 let PRIMARY = {};                                                   // shipped with the app (primary.json)
-const TP = { local: LS.get('fw.teacher.primary', {}), on: LS.get('fw.teacher.on', false) };   // this device's edits
+const TP = { local: LS.get('fw.teacher.primary', {}), on: LS.get('fw.teacher.on', false), can: null };   // this device's edits; can = may publish (null = unknown)
+const SH = { have: false, at: null };
+function applyShared(j) { if (j && j.primary) { PRIMARY = j.primary; HIDDEN = j.hidden || {}; SH.have = true; } }
+/* the published defaults live in Supabase (everyone may read, only listed teachers may write) */
+async function sharedLoad() {
+  if (!sb) return;
+  try {
+    const { data } = await sb.from('app_defaults').select('data,updated_at').eq('id', 'primary').maybeSingle();
+    if (data && data.data) { applyShared(data.data); SH.at = data.updated_at; LS.set('fw.shared', data.data); VC.clear(); refreshAll(); }
+  } catch (e) { /* offline or not set up yet: keep what we have */ }
+  try {
+    if (isCloud()) { const { data, error } = await sb.from('teachers').select('user_id').eq('user_id', A.uid.slice(2)).maybeSingle(); TP.can = error ? null : !!data; }
+    else TP.can = false;
+  } catch (e) { TP.can = null; }
+  if (TP.can === false && TP.on) { TP.on = false; LS.set('fw.teacher.on', false); teacherBody(); refreshAll(); }
+}
+async function publishDefaults() {
+  if (!sb || !isCloud() || TP.can !== true) { toast('Only a teacher account can publish. Sign in first.'); return false; }
+  const data = { v: 1, primary: primaryMerged(), hidden: hiddenMerged() };
+  const { error } = await sb.from('app_defaults').upsert({ id: 'primary', data, updated_at: new Date().toISOString(), updated_by: A.uid.slice(2) });
+  if (error) { toast('Could not publish: ' + (error.message || 'no permission')); return false; }
+  PRIMARY = data.primary; HIDDEN = data.hidden; SH.have = true; SH.at = new Date().toISOString();
+  TP.local = {}; TH.local = {}; LS.set('fw.teacher.primary', {}); LS.set('fw.teacher.hidden', {}); LS.set('fw.shared', data);
+  VC.clear(); refreshAll(); toast('Published. Everyone gets it next time they open the app.'); return true;
+}
 let HIDDEN = {};                                                    // shipped hidden shapes (primary.json "hidden")
 const TH = { local: LS.get('fw.teacher.hidden', {}) };
 function hiddenFor(name) { const k = prefKey(name); return k in TH.local ? TH.local[k] : (HIDDEN[k] || []); }
@@ -1658,6 +1763,37 @@ function setPrimary(name, v) {
   LS.set('fw.teacher.primary', TP.local);
 }
 function teacherBody() { document.body.classList.toggle('teacher', !!TP.on); }
+/* ---- the defaults board: one page to choose the default diagram for every common chord ---- */
+const BOARD_SUF = [['', 'Major'], ['m', 'Minor'], ['7', '7'], ['maj7', 'maj7'], ['m7', 'm7'], ['sus4', 'sus4'], ['sus2', 'sus2'], ['5', 'Power'], ['add9', 'add9'], ['dim', 'dim']];
+const BOARD_ROOTS = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+function boardOpen(tab) {
+  tab = tab || 0; const suf = BOARD_SUF[tab][0], keep = $('#modalBody').scrollTop;
+  const changed = Object.keys(primaryMerged()).length;
+  const tiles = BOARD_ROOTS.map(r => {
+    const nm = cl(r + suf), out = voicingsFor(nm); if (!out.chord.ok || !out.list.length) return '';
+    const v = preferred(nm), k = primaryKey(nm), i = Math.max(0, out.list.findIndex(x => F.vKey(x) === F.vKey(v)));
+    return `<div class="vcard bt ${k ? 'set' : ''}"><div class="name">${esc(sharpen(nm))}${k ? ' ◆' : ''}</div>${diagram(v)}
+      <div class="actions" style="justify-content:center"><button class="btn sm" data-bstep="${esc(nm)}|-1" aria-label="Previous shape">‹</button><span class="note">${i + 1}/${out.list.length}</span><button class="btn sm" data-bstep="${esc(nm)}|1" aria-label="Next shape">›</button></div>
+      <div class="actions" style="justify-content:center"><button class="btn sm ghost" data-bedit="${esc(nm)}">✎ Edit</button>${k ? `<button class="btn sm ghost" data-breset="${esc(nm)}">↺ Auto</button>` : ''}</div></div>`;
+  }).join('');
+  openModal(`<h2>Defaults board</h2>
+    <p class="sub">The ◆ shape is what everyone sees first. ‹ › cycles through the shapes. ${changed} chords set. ${SH.at ? 'Last published ' + esc(new Date(SH.at).toLocaleString()) + '.' : ''}</p>
+    <div class="chiprow">${BOARD_SUF.map(([s, l], j) => `<button class="chip ${j === tab ? 'on' : ''}" data-btab="${j}">${esc(l)}</button>`).join('')}</div>
+    <div class="grid small" style="margin-top:10px">${tiles}</div>
+    <div class="row" style="margin-top:12px">${TP.can ? '<button class="btn primary" id="bPub">Publish to everyone</button>' : '<span class="note">Sign in with a teacher account to publish.</span>'}<button class="btn ghost" id="bExp">Download primary.json</button><span class="grow"></span><button class="btn" data-close>Close</button></div>`, b => {
+    b.scrollTop = keep;
+    b.onclick = async e => {
+      const t = x => e.target.closest(x);
+      const tb = t('[data-btab]'); if (tb) { boardOpen(+tb.dataset.btab); return; }
+      const st = t('[data-bstep]');
+      if (st) { const [nm, d] = st.dataset.bstep.split('|'), list = voicingsFor(nm).list, v = preferred(nm); let i = list.findIndex(x => F.vKey(x) === F.vKey(v)); i = (i + +d + list.length) % list.length; const k = prefKey(nm); TP.local[k] = F.vKey(list[i]); LS.set('fw.teacher.primary', TP.local); VC.clear(); boardOpen(tab); return; }
+      const rs = t('[data-breset]'); if (rs) { TP.local[prefKey(rs.dataset.breset)] = null; LS.set('fw.teacher.primary', TP.local); boardOpen(tab); return; }
+      const ed = t('[data-bedit]'); if (ed) { closeModal(); showView('chords'); setChordText(ed.dataset.bedit); edStart(); return; }
+      if (t('#bExp')) { exportPrimary(); return; }
+      if (t('#bPub')) { if (await publishDefaults()) boardOpen(tab); }
+    };
+  });
+}
 function exportPrimary() {
   const blob = new Blob([JSON.stringify({ v: 1, primary: primaryMerged(), hidden: hiddenMerged() }, null, 1)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'primary.json';
@@ -1675,8 +1811,9 @@ async function importPrimary(e) {
 }
 function initTeacher() {
   teacherBody();
+  applyShared(LS.get('fw.shared', null));
   fetch('primary.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null)
-    .then(j => { if (j && j.primary) { PRIMARY = j.primary; HIDDEN = j.hidden || {}; refreshAll(); } }).catch(() => {});
+    .then(j => { if (j && j.primary && !SH.have) { PRIMARY = j.primary; HIDDEN = j.hidden || {}; refreshAll(); } }).catch(() => {});
 }
 
 /* ================= first-time tour: how to read a chord diagram ================= */
@@ -1876,7 +2013,9 @@ function init() {
   });
   document.addEventListener('click', e => {
     const ps = e.target.closest('[data-playsong]');
-    if (ps) { const r = PLAYABLE.find(x => x[0] === ps.dataset.playsong); if (r) { const q = playSeq(r).filter(pgChordOk); if (q.length) pgPlayer(r[0], q); else toast('No playable shapes for this one'); } return; }
+    if (ps) { const r = PLAYABLE.find(x => x[0] === ps.dataset.playsong); if (r) { const q = playSeq(r).filter(pgChordOk), st = songStyle(r); if (q.length) pgPlayer(r[0], ['#Main loop'].concat(q), { pat: st[0], spd: st[1] }); else toast('No playable shapes for this one'); } return; }
+    const cp = e.target.closest('[data-copysong]');
+    if (cp) { const r = PLAYABLE.find(x => x[0] === cp.dataset.copysong); if (r) { const q = playSeq(r).filter(pgChordOk), st = songStyle(r); seqLoad(null, { name: r[0], bars: ['#Verse'].concat(q), pat: st[0], spd: st[1] }); } return; }
     const l = e.target.closest('[data-learnrow]'); if (l) { learnChords(l.dataset.t, l.dataset.learnrow.split(',')); return; }
     const o = e.target.closest('[data-open]'); if (o && !o.closest('#drawer')) { if (o.closest('#playable,#chartStrip')) playChord(o.dataset.open); else openPicker(o.dataset.open); }
   });
@@ -1926,14 +2065,19 @@ function init() {
   $('#progs').addEventListener('click', e => {
     if (e.target.closest('#pgNew')) { seqLoad(null); return; }
     const pl = e.target.closest('[data-pgplay]'), ed = e.target.closest('[data-pgedit]');
-    if (pl) { const p = D.progs.find(x => x.id === pl.dataset.pgplay); if (p) pgPlayer(p.name, p.chords); }
+    if (pl) { const p = D.progs.find(x => x.id === pl.dataset.pgplay); if (p) pgPlayer(p.name, p.chords, { pat: p.pat, spd: p.spd, bts: p.bts }); }
     if (ed) seqLoad(ed.dataset.pgedit);
   });
   $('#btnLearnSong').onclick = () => { if (S.song) learnChords('Chords in this song', songChordsUI(S.song, S.tr, cfg().flats)); };
   $('#btnPlaySong').onclick = () => {
-    if (!S.song) return; const ch = songChordsUI(S.song, S.tr, cfg().flats).map(canon).filter(pgChordOk);
-    if (!ch.length) { toast('No playable chords in this song'); return; }
+    if (!S.song) return; const ch = songArr(S.song, S.tr);
+    if (!ch.some(isChord)) { toast('No playable chords in this song'); return; }
     pgPlayer(S.song.title || 'Song chords', ch);
+  };
+  $('#btnSongSeq').onclick = () => {
+    if (!S.song) return; const ch = songArr(S.song, S.tr);
+    if (!ch.some(isChord)) { toast('No playable chords in this song'); return; }
+    seqLoad(null, { name: S.song.title || 'My song', bars: ch });
   };
   $('#btnImport').onclick = () => importModal();
   $('#songList').onclick = $('#sampleList').onclick = e => { const b = e.target.closest('[data-song]'); if (b) openSong(b.dataset.song); };
