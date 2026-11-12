@@ -1259,7 +1259,7 @@ function settingsModal() {
       <div class="finish" id="stFin">${FINISHES.map(p => `<button class="fin" data-f="${p.id}" aria-label="${p.n}" title="${p.n}" style="--h:${p.hue}deg;--s:${p.sat};--b:${p.bri}"></button>`).join('')}</div>
       <label class="field" style="margin:0"><span>Colour shift</span><input type="range" id="stHue" min="-180" max="180" value="${(c.finish && c.finish.hue) || 0}"></label></div>
     ${IS_STANDALONE ? '' : '<div class="field"><button class="btn sm" id="stA2">Add to home screen</button></div>'}
-    <div class="field row"><button class="btn sm" id="stLab">Tweak the look (style lab)</button><button class="btn sm" id="stStk">Stickers</button></div>
+    <div class="field row"><button class="btn sm" id="stLab">Tweak the look (style lab)</button><button class="btn sm" id="stStk">Stickers</button><button class="btn sm" id="stFresh">↻ Get the latest version</button></div>
     <div class="toggles">
       <label class="switch"><span>Left-handed diagrams</span><input type="checkbox" id="stLh" ${c.lh ? 'checked' : ''}><i></i></label>
       <label class="switch"><span>Use flats (B♭) instead of sharps</span><input type="checkbox" id="stFl" ${c.flats ? 'checked' : ''}><i></i></label>
@@ -1296,6 +1296,12 @@ function settingsModal() {
     $('#stFin', b).onclick = e => { const x = e.target.closest('[data-f]'); if (!x) return; const p = FINISHES.find(q => q.id === x.dataset.f); Object.assign(fin(), { hue: p.hue, sat: p.sat, bri: p.bri }); $('#stHue', b).value = p.hue; save(); applyFinish(); };
     if ($('#stA2', b)) $('#stA2', b).onclick = a2hsAsk;
     $('#stLab', b).onclick = labOpen;
+    $('#stFresh', b).onclick = async () => {   // forget the saved copy of the app and load it again from the web (your songs and settings are kept)
+      toast('Loading the latest version…');
+      try { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(r => r.unregister())); } catch (e) {}
+      try { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); } catch (e) {}
+      location.reload();
+    };
     $('#stStk', b).onclick = stkOpen;
     $('#stHue', b).oninput = e => { fin().hue = +e.target.value; applyFinish(); };
     $('#stHue', b).onchange = () => save();
