@@ -42,7 +42,7 @@ const D = {
   'Your first 4 chords': 'Tvoje prvé 4 akordy',
   'Show the keyboard ▾': 'Ukázať klaviatúru ▾', 'Hide the keyboard ▴': 'Skryť klaviatúru ▴', '▶ Hear it': '▶ Počuť', '▶ Play it': '▶ Prehrať', '■ Stop': '■ Stop',
   'Hear what you will be able to play': 'Počúvaj, čo budeš vedieť zahrať', 'Three chords are all it takes for a song everyone knows.': 'Tri akordy stačia na pieseň, ktorú pozná každý.',
-  'Tap or swipe across the strings to hear them': 'Ťukni alebo prejdi prstom po strunách', 'Tap a shape to hear it': 'Ťukni na tvar a započuješ ho', '▶ Strum all': '▶ Zahraj všetky',
+  'Tap or swipe across the strings to hear them': 'Ťukni alebo prejdi prstom po strunách', 'Tap a chord to hear it': 'Ťukni na akord, aby si ho počul', '▶ Strum all': '▶ Zahraj všetky',
   'Learn chords': 'Nauč sa akordy', 'Chords in this song': 'Akordy v tejto piesni', 'One shape for each chord. Tap a diagram to hear it.': 'Jeden tvar pre každý akord. Ťukni na diagram a započuješ ho.', 'Open in Chords': 'Otvoriť v Akordoch', 'Other shapes': 'Iné tvary',
   'Type any chord here to see it and learn it': 'Sem napíš akýkoľvek akord, uvidíš ho a naučíš sa ho',
   '📌 Pin to top': '📌 Pripnúť hore', '📌 Pinned (tap to unpin)': '📌 Pripnuté (ťukni na odopnutie)', '＋ Add to sequence': '＋ Pridať do sekvencie', 'Sequence': 'Sekvencia',
